@@ -14,13 +14,13 @@ pip install trajdata
 In case you would also like to use datasets such as nuScenes and Lyft Level 5 (which require their own devkits to access raw data), the following will also install the respective devkits.
 ```sh
 # For nuScenes
-pip install trajdata[nusc]
+pip install "trajdata[nusc]"
 
 # For Lyft
-pip install trajdata[lyft]
+pip install "trajdata[lyft]"
 
 # Both
-pip install trajdata[nusc,lyft]
+pip install "trajdata[nusc,lyft]"
 ```
 Then, download the raw datasets (nuScenes, Lyft Level 5, ETH/UCY, etc) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
 
