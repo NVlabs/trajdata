@@ -1,6 +1,6 @@
 import unittest
 
-from avdata import UnifiedDataset
+from trajdata import UnifiedDataset
 
 
 class TestDescriptionMatching(unittest.TestCase):

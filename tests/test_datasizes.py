@@ -1,6 +1,6 @@
 import unittest
 
-from avdata import AgentType, UnifiedDataset
+from trajdata import AgentType, UnifiedDataset
 
 
 class TestDatasetSizes(unittest.TestCase):

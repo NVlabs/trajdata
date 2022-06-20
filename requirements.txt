@@ -1,5 +1,3 @@
-# Python 3.8
-
 numpy==1.19
 tqdm==4.62
 matplotlib==3.5

@@ -6,21 +6,21 @@
 
 ## Installation
 
-The easiest way to install avdata is through PyPI with
+The easiest way to install trajdata is through PyPI with
 ```sh
-pip install avdata
+pip install trajdata
 ```
 
 In case you would also like to use datasets such as nuScenes and Lyft Level 5 (which require their own devkits to access raw data), the following will also install the respective devkits.
 ```sh
 # For nuScenes
-pip install avdata[nusc]
+pip install trajdata[nusc]
 
 # For Lyft
-pip install avdata[lyft]
+pip install trajdata[lyft]
 
 # Both
-pip install avdata[nusc,lyft]
+pip install trajdata[nusc,lyft]
 ```
 Then, download the raw datasets (nuScenes, Lyft Level 5, ETH/UCY, etc) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
 
@@ -30,7 +30,7 @@ First, in whichever environment you would like to use (conda, venv, ...), make s
 ```
 pip install -r requirements.txt
 ```
-Then, install avdata itself in editable mode with
+Then, install trajdata itself in editable mode with
 ```
 pip install -e .
 ```
@@ -48,7 +48,7 @@ At a minimum, batches of data for training/evaluation/etc can be loaded the foll
 ```py
 import os
 from torch.utils.data import DataLoader
-from avdata import AgentBatch, UnifiedDataset
+from trajdata import AgentBatch, UnifiedDataset
 
 # See below for a list of already-supported datasets and splits.
 dataset = UnifiedDataset(
@@ -75,7 +75,7 @@ for batch in dataloader:
 
 For a more comprehensive example, please see `examples/batch_example.py`.
 
-For more information on all of the possible `UnifiedDataset` constructor arguments, please see `src/avdata/dataset.py`.
+For more information on all of the possible `UnifiedDataset` constructor arguments, please see `src/trajdata/dataset.py`.
 
 ## Supported Datasets
 Currently, the dataloader supports interfacing with the following datasets:
@@ -104,12 +104,12 @@ dataset = UnifiedDataset(desired_data=["nusc_mini", "eupeds_eth"])
 ```
 
 ## Adding New Datasets
-The code that interfaces raw datasets can be found in `src/avdata/dataset_specific`.
+The code that interfaces raw datasets can be found in `src/trajdata/dataset_specific`.
 
 To add a new dataset, ...
 
 ## Simulation Interface
-One additional feature of avdata is that it can be used to initialize simulations from real data and track resulting agent motion, metrics, etc. 
+One additional feature of trajdata is that it can be used to initialize simulations from real data and track resulting agent motion, metrics, etc. 
 
 At a minimum, a simulation can be initialized and stepped through as follows (also present in `examples/simple_sim_example.py`):
 ```py
@@ -117,9 +117,9 @@ from typing import Dict # Just for type annotations
 
 import numpy as np
 
-from avdata import AgentBatch, UnifiedDataset
-from avdata.data_structures.scene_metadata import Scene # Just for type annotations
-from avdata.simulation import SimulationScene
+from trajdata import AgentBatch, UnifiedDataset
+from trajdata.data_structures.scene_metadata import Scene # Just for type annotations
+from trajdata.simulation import SimulationScene
 
 # See below for a list of already-supported datasets and splits.
 dataset = UnifiedDataset(

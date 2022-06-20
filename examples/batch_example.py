@@ -3,9 +3,9 @@ from collections import defaultdict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from avdata import AgentBatch, AgentType, UnifiedDataset
-from avdata.augmentation import NoiseHistories
-from avdata.visualization.vis import plot_agent_batch
+from trajdata import AgentBatch, AgentType, UnifiedDataset
+from trajdata.augmentation import NoiseHistories
+from trajdata.visualization.vis import plot_agent_batch
 
 
 def main():

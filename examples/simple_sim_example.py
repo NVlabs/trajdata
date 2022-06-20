@@ -2,9 +2,9 @@ from typing import Dict  # Just for type annotations
 
 import numpy as np
 
-from avdata import AgentBatch, UnifiedDataset
-from avdata.data_structures.scene_metadata import Scene  # Just for type annotations
-from avdata.simulation import SimulationScene
+from trajdata import AgentBatch, UnifiedDataset
+from trajdata.data_structures.scene_metadata import Scene  # Just for type annotations
+from trajdata.simulation import SimulationScene
 
 dataset = UnifiedDataset(
     desired_data=["nusc_mini"],

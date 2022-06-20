@@ -4,10 +4,10 @@ from typing import Dict, List, Tuple
 import numpy as np
 from tqdm import trange
 
-from avdata import AgentBatch, AgentType, UnifiedDataset
-from avdata.data_structures.scene_metadata import Scene
-from avdata.simulation import SimulationScene, sim_metrics, sim_stats, sim_vis
-from avdata.visualization.vis import plot_agent_batch
+from trajdata import AgentBatch, AgentType, UnifiedDataset
+from trajdata.data_structures.scene_metadata import Scene
+from trajdata.simulation import SimulationScene, sim_metrics, sim_stats, sim_vis
+from trajdata.visualization.vis import plot_agent_batch
 
 
 def main():
