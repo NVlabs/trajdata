@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as follows."
+authors:
+- family-names: "Ivanovic"
+  given-names: "Boris"
+  orcid: "https://orcid.org/0000-0002-8698-202X"
+title: "trajdata: A unified interface to many trajectory forecasting datasets"
+version: 1.0.3
+doi: 10.5281/zenodo.6671548
+date-released: 2022-06-20
+url: "https://github.com/nvr-avg/trajdata"
