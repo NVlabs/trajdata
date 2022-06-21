@@ -54,10 +54,9 @@ from trajdata import AgentBatch, UnifiedDataset
 
 # See below for a list of already-supported datasets and splits.
 dataset = UnifiedDataset(
-    desired_data=["nusc_mini, lyft_sample"],
+    desired_data=["nusc_mini"],
     data_dirs={  # Remember to change this to match your filesystem!
-        "nusc_mini": "~/datasets/nuScenes",
-        "lyft_sample": "~/datasets/lyft/scenes/sample.zarr",
+        "nusc_mini": "~/datasets/nuScenes"
     },
 )
 
@@ -82,19 +81,19 @@ For more information on all of the possible `UnifiedDataset` constructor argumen
 ## Supported Datasets
 Currently, the dataloader supports interfacing with the following datasets:
 
-| Dataset | ID | Splits | Add'l Tags | Description |
-|---------|----|--------|------------|-------------|
-| nuScenes | `nusc` | `train`, `val`, `test` | `boston`, `singapore` | nuScenes' training/validation/test splits (700/150/150 scenes) |
-| nuScenes Mini | `nusc_mini` | `mini_train`, `mini_val` | `boston`, `singapore` | nuScenes mini training/validation splits (8/2 scenes) |
-| Lyft Level 5 Train | `lyft_train` | `train` | `palo_alto` | Lyft Level 5 training data - part 1/2 (8.4 GB) |
-| Lyft Level 5 Train Full | `lyft_train_full` | `train` | `palo_alto` | Lyft Level 5 training data - part 2/2 (70 GB) |
-| Lyft Level 5 Validation | `lyft_val` | `val` | `palo_alto` | Lyft Level 5 validation data (8.2 GB) |
-| Lyft Level 5 Sample | `lyft_sample` | `mini_train`, `mini_val` | `palo_alto` | Lyft Level 5 sample data (100 scenes, randomly split 80/20 for training/validation) |
-| ETH - Univ | `eupeds_eth` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `zurich` | The ETH (University) scene from the ETH BIWI Walking Pedestrians dataset |
-| ETH - Hotel | `eupeds_hotel` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `zurich` | The Hotel scene from the ETH BIWI Walking Pedestrians dataset |
-| UCY - Univ | `eupeds_univ` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The University scene from the UCY Pedestrians dataset |
-| UCY - Zara1 | `eupeds_zara1` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The Zara1 scene from the UCY Pedestrians dataset |
-| UCY - Zara2 | `eupeds_zara2` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The Zara2 scene from the UCY Pedestrians dataset |
+| Dataset | ID | Splits | Add'l Tags | Description | dt | Maps |
+|---------|----|--------|------------|-------------|----|------|
+| nuScenes | `nusc` | `train`, `val`, `test` | `boston`, `singapore` | nuScenes' training/validation/test splits (700/150/150 scenes) | 0.5s (2Hz) | :white_check_mark: |
+| nuScenes Mini | `nusc_mini` | `mini_train`, `mini_val` | `boston`, `singapore` | nuScenes mini training/validation splits (8/2 scenes) | 0.5s (2Hz) | :white_check_mark: |
+| Lyft Level 5 Train | `lyft_train` | `train` | `palo_alto` | Lyft Level 5 training data - part 1/2 (8.4 GB) | 0.1s (10Hz) | :white_check_mark: |
+| Lyft Level 5 Train Full | `lyft_train_full` | `train` | `palo_alto` | Lyft Level 5 training data - part 2/2 (70 GB) | 0.1s (10Hz) | :white_check_mark: |
+| Lyft Level 5 Validation | `lyft_val` | `val` | `palo_alto` | Lyft Level 5 validation data (8.2 GB) | 0.1s (10Hz) | :white_check_mark: |
+| Lyft Level 5 Sample | `lyft_sample` | `mini_train`, `mini_val` | `palo_alto` | Lyft Level 5 sample data (100 scenes, randomly split 80/20 for training/validation) | 0.1s (10Hz) | :white_check_mark: |
+| ETH - Univ | `eupeds_eth` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `zurich` | The ETH (University) scene from the ETH BIWI Walking Pedestrians dataset | 0.4s (2.5Hz) | |
+| ETH - Hotel | `eupeds_hotel` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `zurich` | The Hotel scene from the ETH BIWI Walking Pedestrians dataset | 0.4s (2.5Hz) | |
+| UCY - Univ | `eupeds_univ` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The University scene from the UCY Pedestrians dataset | 0.4s (2.5Hz) | |
+| UCY - Zara1 | `eupeds_zara1` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The Zara1 scene from the UCY Pedestrians dataset | 0.4s (2.5Hz) | |
+| UCY - Zara2 | `eupeds_zara2` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The Zara2 scene from the UCY Pedestrians dataset | 0.4s (2.5Hz) | |
 
 ## Examples
 
@@ -102,8 +101,17 @@ Currently, the dataloader supports interfacing with the following datasets:
 The following will load data from both the nuScenes mini dataset as well as the ETH - University scene from the ETH BIWI Walking Pedestrians dataset.
 
 ```py
-dataset = UnifiedDataset(desired_data=["nusc_mini", "eupeds_eth"])
+dataset = UnifiedDataset(
+    desired_data=["nusc_mini", "eupeds_eth"],
+    data_dirs={  # Remember to change this to match your filesystem!
+        "nusc_mini": "~/datasets/nuScenes",
+        "eupeds_eth": "~/datasets/eth_ucy_peds"
+    },
+    desired_dt=0.1, # Please see the note below about common dt!
+)
 ```
+
+**Note**: Be careful about loading multiple datasets without an associated `desired_dt` argument; many datasets do not share the same underlying data annotation frequency. To address this, we've implemented timestep interpolation to a common frequency which will ensure that all batched data shares the same dt. Interpolation can only be performed to integer multiples of the original data annotation frequency. For example, nuScenes' `dt=0.5` and the ETH BIWI dataset's `dt=0.4` can be interpolated to a common `desired_dt=0.1`.
 
 ## Adding New Datasets
 The code that interfaces raw datasets can be found in `src/trajdata/dataset_specific`.
