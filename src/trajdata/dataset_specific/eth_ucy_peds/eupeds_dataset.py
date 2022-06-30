@@ -150,7 +150,7 @@ class EUPedsDataset(RawDataset):
 
             # Saving all scene records for later caching.
             all_scenes_list.append(
-                EUPedsRecord(scene_name, scene_location, scene_length, scene_split)
+                EUPedsRecord(scene_name, scene_location, scene_length, scene_split, idx)
             )
 
             if (
@@ -177,9 +177,9 @@ class EUPedsDataset(RawDataset):
     ) -> List[Scene]:
         all_scenes_list: List[EUPedsRecord] = env_cache.load_env_scenes_list(self.name)
 
-        scenes_list: List[SceneMetadata] = list()
+        scenes_list: List[Scene] = list()
         for scene_record in all_scenes_list:
-            scene_name, scene_location, scene_length, scene_split = scene_record
+            scene_name, scene_location, scene_length, scene_split, data_idx = scene_record
 
             if (
                 (scene_location in scene_tag or "loo" in scene_split)
@@ -192,6 +192,7 @@ class EUPedsDataset(RawDataset):
                     scene_location,
                     scene_split,
                     scene_length,
+                    data_idx,
                     None,  # This isn't used if everything is already cached.
                 )
                 scenes_list.append(scene_metadata)
@@ -199,7 +200,7 @@ class EUPedsDataset(RawDataset):
         return scenes_list
 
     def get_scene(self, scene_info: SceneMetadata) -> Scene:
-        _, scene_name, _, _ = scene_info
+        _, scene_name, _, data_idx = scene_info
 
         scene_data: pd.DataFrame = self.dataset_obj[scene_name]
         scene_location: str = get_location(scene_name)
@@ -212,6 +213,7 @@ class EUPedsDataset(RawDataset):
             scene_location,
             scene_split,
             scene_length,
+            data_idx,
             None,  # No data access info necessary for the ETH/UCY datasets.
         )
 

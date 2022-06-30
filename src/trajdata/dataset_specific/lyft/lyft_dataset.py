@@ -106,7 +106,7 @@ class LyftDataset(RawDataset):
             ).item()  # Doing .item() otherwise it'll be a numpy.int64
 
             # Saving all scene records for later caching.
-            all_scenes_list.append(LyftSceneRecord(scene_name, scene_length))
+            all_scenes_list.append(LyftSceneRecord(scene_name, scene_length, idx))
 
             if (
                 "palo_alto" in scene_tag
@@ -141,6 +141,7 @@ class LyftDataset(RawDataset):
             "palo_alto",
             scene_split,
             scene_length,
+            data_idx,
             scene_frames,
         )
 
@@ -156,7 +157,7 @@ class LyftDataset(RawDataset):
 
         scenes_list: List[SceneMetadata] = list()
         for scene_record in all_scenes_list:
-            scene_name, scene_length = scene_record
+            scene_name, scene_length, data_idx = scene_record
             scene_split: str = self.metadata.scene_split_map[scene_name]
 
             if (
@@ -170,6 +171,7 @@ class LyftDataset(RawDataset):
                     "palo_alto",
                     scene_split,
                     scene_length,
+                    data_idx,
                     None,  # This isn't used if everything is already cached.
                 )
                 scenes_list.append(scene_metadata)

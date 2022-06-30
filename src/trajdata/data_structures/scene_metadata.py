@@ -19,6 +19,7 @@ class Scene:
         location: str,
         data_split: str,
         length_timesteps: int,
+        raw_data_idx: int,
         data_access_info: Any,
         description: Optional[str] = None,
         agents: Optional[List[AgentMetadata]] = None,
@@ -31,6 +32,7 @@ class Scene:
         self.data_split = data_split
         self.dt = env_metadata.dt
         self.length_timesteps = length_timesteps
+        self.raw_data_idx = raw_data_idx
         self.data_access_info = data_access_info
         self.description = description
         self.agents = agents

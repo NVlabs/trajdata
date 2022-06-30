@@ -95,7 +95,7 @@ class NuscDataset(RawDataset):
 
             # Saving all scene records for later caching.
             all_scenes_list.append(
-                NuscSceneRecord(scene_name, scene_location, scene_length, scene_desc)
+                NuscSceneRecord(scene_name, scene_location, scene_length, scene_desc, idx)
             )
 
             if scene_location.split("-")[0] in scene_tag and scene_split in scene_tag:
@@ -127,7 +127,7 @@ class NuscDataset(RawDataset):
 
         scenes_list: List[SceneMetadata] = list()
         for scene_record in all_scenes_list:
-            scene_name, scene_location, scene_length, scene_desc = scene_record
+            scene_name, scene_location, scene_length, scene_desc, data_idx = scene_record
             scene_split: str = self.metadata.scene_split_map[scene_name]
 
             if scene_location.split("-")[0] in scene_tag and scene_split in scene_tag:
@@ -142,6 +142,7 @@ class NuscDataset(RawDataset):
                     scene_location,
                     scene_split,
                     scene_length,
+                    data_idx,
                     None,  # This isn't used if everything is already cached.
                     scene_desc,
                 )
@@ -167,6 +168,7 @@ class NuscDataset(RawDataset):
             scene_location,
             scene_split,
             scene_length,
+            data_idx,
             scene_record,
             scene_desc,
         )

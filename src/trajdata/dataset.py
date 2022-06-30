@@ -411,8 +411,8 @@ class UnifiedDataset(Dataset):
         scene_tags: List[SceneTag],
         scene_description_contains: Optional[List[str]],
         env: RawDataset,
-    ) -> List[SceneMetadata]:
-        scenes_list: List[SceneMetadata] = list()
+    ) -> Union[List[Scene], List[SceneMetadata]]:
+        scenes_list: Union[List[Scene], List[SceneMetadata]] = list()
         for scene_tag in scene_tags:
             if env.name in scene_tag:
                 scenes_list += env.get_matching_scenes(
