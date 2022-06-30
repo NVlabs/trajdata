@@ -363,9 +363,6 @@ class DataFrameCache(SceneCache):
             [agent.last_timestep for agent in agents], dtype=np.long
         )
 
-        first_timesteps = np.array(
-            [agent.first_timestep for agent in agents], dtype=np.long
-        )
         first_timesteps = np.minimum(scene_ts + 1, last_timesteps)
 
         if future_sec[1] is not None:
