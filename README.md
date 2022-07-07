@@ -170,7 +170,6 @@ for t in range(1, sim_scene.scene_info.length_timesteps):
 `examples/sim_example.py` contains a more comprehensive example which initializes a simulation from a scene in the nuScenes mini dataset, steps through it by replaying agents' GT motions, and computes metrics based on scene statistics (e.g., displacement error from the original GT data, velocity/acceleration/jerk histograms).
 
 ## TODO
-- Merge in upstream scene batch pull request.
 - Create a method like finalize() which writes all the batch information to a TFRecord/WebDataset/some other format which is (very) fast to read from for higher epoch training.
 - Add more examples to the README.
 - Finish README section about how to add a new dataset.

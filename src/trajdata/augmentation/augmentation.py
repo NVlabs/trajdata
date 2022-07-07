@@ -1,6 +1,6 @@
 import pandas as pd
 
-from trajdata.data_structures.batch import AgentBatch
+from trajdata.data_structures.batch import AgentBatch, SceneBatch
 
 
 class Augmentation:
@@ -14,5 +14,8 @@ class DatasetAugmentation(Augmentation):
 
 
 class BatchAugmentation(Augmentation):
-    def apply(self, agent_batch: AgentBatch) -> None:
+    def apply_agent(self, agent_batch: AgentBatch) -> None:
+        raise NotImplementedError()
+
+    def apply_scene(self, scene_batch: SceneBatch) -> None:
         raise NotImplementedError()

@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from trajdata import AgentBatch, AgentType, UnifiedDataset
 from trajdata.augmentation import NoiseHistories
-from trajdata.visualization.vis import plot_agent_batch
+from trajdata.visualization.vis import plot_scene_batch
 
 
 def main():
@@ -13,17 +13,18 @@ def main():
 
     dataset = UnifiedDataset(
         desired_data=["nusc_mini-mini_train"],
-        centric="agent",
+        centric="scene",
         desired_dt=0.1,
         history_sec=(3.2, 3.2),
         future_sec=(4.8, 4.8),
         only_types=[AgentType.VEHICLE],
         agent_interaction_distances=defaultdict(lambda: 30.0),
-        incl_robot_future=False,
+        incl_robot_future=True,
         incl_map=True,
         map_params={"px_per_m": 2, "map_size_px": 224, "offset_frac_xy": (-0.5, 0.0)},
         augmentations=[noise_hists],
-        num_workers=0,
+        max_agent_num=20,
+        num_workers=4,
         verbose=True,
         data_dirs={  # Remember to change this to match your filesystem!
             "nusc_mini": "~/datasets/nuScenes",
@@ -43,7 +44,7 @@ def main():
 
     batch: AgentBatch
     for batch in tqdm(dataloader):
-        plot_agent_batch(batch, batch_idx=0)
+        plot_scene_batch(batch, batch_idx=0)
 
 
 if __name__ == "__main__":

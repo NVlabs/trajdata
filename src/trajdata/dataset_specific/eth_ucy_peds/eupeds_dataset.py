@@ -179,7 +179,13 @@ class EUPedsDataset(RawDataset):
 
         scenes_list: List[Scene] = list()
         for scene_record in all_scenes_list:
-            scene_name, scene_location, scene_length, scene_split, data_idx = scene_record
+            (
+                scene_name,
+                scene_location,
+                scene_length,
+                scene_split,
+                data_idx,
+            ) = scene_record
 
             if (
                 (scene_location in scene_tag or "loo" in scene_split)

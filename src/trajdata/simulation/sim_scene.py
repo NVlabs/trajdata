@@ -37,7 +37,6 @@ class SimulationScene:
         self.init_scene_ts: int = init_timestep
         self.freeze_agents: bool = freeze_agents
         self.return_dict: bool = return_dict
-
         self.scene_ts: int = self.init_scene_ts
 
         agents_present: List[AgentMetadata] = self.scene_info.agent_presence[
@@ -111,7 +110,6 @@ class SimulationScene:
             scene_time_agent = SceneTimeAgent(
                 self.scene_info, self.scene_ts, self.agents, agent, self.cache
             )
-
             agent_data_list.append(
                 AgentBatchElement(
                     self.cache,
@@ -124,6 +122,7 @@ class SimulationScene:
                     incl_map=get_map and self.dataset.incl_map,
                     map_params=self.dataset.map_params,
                     standardize_data=self.dataset.standardize_data,
+                    standardize_derivatives=self.dataset.standardize_derivatives,
                 )
             )
 

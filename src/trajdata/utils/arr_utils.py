@@ -79,6 +79,23 @@ def transform_matrices(angles: Tensor, translations: Tensor) -> Tensor:
     )
 
 
+def batch_nd_transform_points_np(points, Mat):
+    ndim = Mat.shape[-1] - 1
+    batch = list(range(Mat.ndim - 2)) + [Mat.ndim - 1] + [Mat.ndim - 2]
+    Mat = np.transpose(Mat, batch)
+    if points.ndim == Mat.ndim - 1:
+        return (points[..., np.newaxis, :] @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
+            ..., -1:, :ndim
+        ].squeeze(-2)
+    elif points.ndim == Mat.ndim:
+        return (
+            (points[..., np.newaxis, :] @ Mat[..., np.newaxis, :ndim, :ndim])
+            + Mat[..., np.newaxis, -1:, :ndim]
+        ).squeeze(-2)
+    else:
+        raise Exception("wrong shape")
+
+
 def agent_aware_diff(values: np.ndarray, agent_ids: np.ndarray) -> np.ndarray:
     values_diff: np.ndarray = np.diff(
         values, axis=0, prepend=values[[0]] - (values[[1]] - values[[0]])
@@ -97,3 +114,57 @@ def agent_aware_diff(values: np.ndarray, agent_ids: np.ndarray) -> np.ndarray:
     values_diff[border_mask] = values_diff[border_mask + 1]
 
     return values_diff
+
+
+def batch_proj(x, line):
+    # x:[batch,3], line:[batch,N,3]
+    line_length = line.shape[-2]
+    batch_dim = x.ndim - 1
+    if isinstance(x, torch.Tensor):
+        delta = line[..., 0:2] - torch.unsqueeze(x[..., 0:2], dim=-2).repeat(
+            *([1] * batch_dim), line_length, 1
+        )
+        dis = torch.linalg.norm(delta, axis=-1)
+        idx0 = torch.argmin(dis, dim=-1)
+        idx = idx0.view(*line.shape[:-2], 1, 1).repeat(
+            *([1] * (batch_dim + 1)), line.shape[-1]
+        )
+        line_min = torch.squeeze(torch.gather(line, -2, idx), dim=-2)
+        dx = x[..., None, 0] - line[..., 0]
+        dy = x[..., None, 1] - line[..., 1]
+        delta_y = -dx * torch.sin(line_min[..., None, 2]) + dy * torch.cos(
+            line_min[..., None, 2]
+        )
+        delta_x = dx * torch.cos(line_min[..., None, 2]) + dy * torch.sin(
+            line_min[..., None, 2]
+        )
+
+        delta_psi = angle_wrap(x[..., 2] - line_min[..., 2])
+
+        return (
+            delta_x,
+            delta_y,
+            torch.unsqueeze(delta_psi, dim=-1),
+        )
+    elif isinstance(x, np.ndarray):
+        delta = line[..., 0:2] - np.repeat(
+            x[..., np.newaxis, 0:2], line_length, axis=-2
+        )
+        dis = np.linalg.norm(delta, axis=-1)
+        idx0 = np.argmin(dis, axis=-1)
+        idx = idx0.reshape(*line.shape[:-2], 1, 1).repeat(line.shape[-1], axis=-1)
+        line_min = np.squeeze(np.take_along_axis(line, idx, axis=-2), axis=-2)
+        dx = x[..., None, 0] - line[..., 0]
+        dy = x[..., None, 1] - line[..., 1]
+        delta_y = -dx * np.sin(line_min[..., None, 2]) + dy * np.cos(
+            line_min[..., None, 2]
+        )
+        delta_x = dx * np.cos(line_min[..., None, 2]) + dy * np.sin(
+            line_min[..., None, 2]
+        )
+        delta_psi = angle_wrap(x[..., 2] - line_min[..., 2])
+        return (
+            delta_x,
+            delta_y,
+            np.expand_dims(delta_psi, axis=-1),
+        )

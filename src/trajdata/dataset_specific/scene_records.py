@@ -8,12 +8,14 @@ class EUPedsRecord(NamedTuple):
     split: str
     data_idx: int
 
+
 class NuscSceneRecord(NamedTuple):
     name: str
     location: str
     length: str
     desc: str
     data_idx: int
+
 
 class LyftSceneRecord(NamedTuple):
     name: str

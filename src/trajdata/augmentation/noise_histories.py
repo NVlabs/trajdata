@@ -1,7 +1,7 @@
 import torch
 
 from trajdata.augmentation.augmentation import BatchAugmentation
-from trajdata.data_structures.batch import AgentBatch
+from trajdata.data_structures.batch import AgentBatch, SceneBatch
 
 
 class NoiseHistories(BatchAugmentation):
@@ -9,10 +9,15 @@ class NoiseHistories(BatchAugmentation):
         self.mean = mean
         self.stddev = stddev
 
-    def apply(self, agent_batch: AgentBatch) -> None:
+    def apply_agent(self, agent_batch: AgentBatch) -> None:
         agent_batch.agent_hist[..., :-1, :] += torch.normal(
             self.mean, self.stddev, size=agent_batch.agent_hist[..., :-1, :].shape
         )
         agent_batch.neigh_hist[..., :-1, :] += torch.normal(
             self.mean, self.stddev, size=agent_batch.neigh_hist[..., :-1, :].shape
+        )
+
+    def apply_scene(self, scene_batch: SceneBatch) -> None:
+        scene_batch.agent_hist[..., :-1, :] += torch.normal(
+            self.mean, self.stddev, size=scene_batch.agent_hist[..., :-1, :].shape
         )

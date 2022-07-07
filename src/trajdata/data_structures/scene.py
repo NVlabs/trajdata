@@ -38,24 +38,15 @@ class SceneTime:
             agents_present, no_types, only_types
         )
 
-        data_df: pd.DataFrame = cache.load_all_agent_data(scene)
-
-        agents: List[Agent] = list()
-        for agent_info in filtered_agents:
-            agents.append(Agent(agent_info, data_df.loc[agent_info.name]))
-
-        return cls(scene, scene_ts, agents, cache)
+        return cls(scene, scene_ts, filtered_agents, cache)
 
     def get_agent_distances_to(self, agent: Agent) -> np.ndarray:
-        agent_pos = np.array(
-            [[agent.data.at[self.ts, "x"], agent.data.at[self.ts, "y"]]]
+        agent_pos: np.ndarray = self.cache.get_state(agent.name, self.ts)[:2]
+        nb_pos: np.ndarray = np.stack(
+            [self.cache.get_state(nb.name, self.ts)[:2] for nb in self.agents]
         )
 
-        data_df: pd.DataFrame = self.cache.load_agent_xy_at_time(self.ts, self.scene)
-
-        agent_ids = [a.name for a in self.agents]
-        curr_poses = data_df.loc[agent_ids, ["x", "y"]].values
-        return np.linalg.norm(curr_poses - agent_pos, axis=1)
+        return np.linalg.norm(nb_pos - agent_pos, axis=1)
 
 
 class SceneTimeAgent:

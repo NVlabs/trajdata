@@ -60,7 +60,9 @@ class UnifiedDataset(Dataset):
         only_types: Optional[List[AgentType]] = None,
         no_types: Optional[List[AgentType]] = None,
         standardize_data: bool = True,
+        standardize_derivatives: bool = True,
         augmentations: Optional[List[Augmentation]] = None,
+        max_agent_num: Optional[int] = None,
         data_dirs: Dict[str, str] = {
             # "nusc": "~/datasets/nuScenes",
             "eupeds_eth": "~/datasets/eth_ucy_peds",
@@ -135,8 +137,10 @@ class UnifiedDataset(Dataset):
         self.only_types = None if only_types is None else set(only_types)
         self.no_types = None if no_types is None else set(no_types)
         self.standardize_data = standardize_data
+        self.standardize_derivatives = standardize_derivatives
         self.augmentations = augmentations
         self.verbose = verbose
+        self.max_agent_num = max_agent_num
 
         # Ensuring scene description queries are all lowercase
         if scene_description_contains is not None:
@@ -388,7 +392,9 @@ class UnifiedDataset(Dataset):
             )
         elif self.centric == "scene":
             collate_fn = partial(
-                scene_collate_fn, return_dict=return_dict, batch_augments=batch_augments
+                scene_collate_fn,
+                return_dict=return_dict,
+                batch_augments=batch_augments,
             )
 
         return collate_fn
@@ -576,7 +582,6 @@ class UnifiedDataset(Dataset):
     # @profile
     def __getitem__(self, idx: int) -> AgentBatchElement:
         scene_path, scene_index_elem = self._data_index[idx]
-
         if self.centric == "scene":
             scene_info, _, scene_index_elems = UnifiedDataset._get_data_index_scene(
                 (scene_path, None),
@@ -618,8 +623,20 @@ class UnifiedDataset(Dataset):
                 only_types=self.only_types,
                 no_types=self.no_types,
             )
-
-            return SceneBatchElement(scene_time, self.history_sec, self.future_sec)
+            return SceneBatchElement(
+                scene_cache,
+                idx,
+                scene_time,
+                self.history_sec,
+                self.future_sec,
+                self.agent_interaction_distances,
+                self.incl_robot_future,
+                self.incl_map,
+                self.map_params,
+                self.standardize_data,
+                self.standardize_derivatives,
+                self.max_agent_num,
+            )
         elif self.centric == "agent":
             scene_time_agent: SceneTimeAgent = SceneTimeAgent.from_cache(
                 scene_info,
@@ -642,4 +659,5 @@ class UnifiedDataset(Dataset):
                 self.incl_map,
                 self.map_params,
                 self.standardize_data,
+                self.standardize_derivatives,
             )
