@@ -353,7 +353,8 @@ class SceneBatchElement:
                 sincos_heading=True,
             )
         else:
-            self.agent_from_world_tf: np.ndarray = np.eye(3)
+            self.centered_agent_from_world_tf: np.ndarray = np.eye(3)
+            self.centered_world_from_agent_tf: np.ndarray = np.eye(3)
 
         ### NEIGHBOR-SPECIFIC DATA ###
         def distance_limit(agent_types: np.ndarray, target_type: int) -> np.ndarray:

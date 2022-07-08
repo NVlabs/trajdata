@@ -580,7 +580,7 @@ class UnifiedDataset(Dataset):
         return self._data_len
 
     # @profile
-    def __getitem__(self, idx: int) -> AgentBatchElement:
+    def __getitem__(self, idx: int) -> Union[SceneBatchElement, AgentBatchElement]:
         scene_path, scene_index_elem = self._data_index[idx]
         if self.centric == "scene":
             scene_info, _, scene_index_elems = UnifiedDataset._get_data_index_scene(
