@@ -30,6 +30,14 @@ class SimulationScene:
         freeze_agents: bool = True,
         return_dict: bool = False,
     ) -> None:
+        if not freeze_agents:
+            raise NotImplementedError(
+                (
+                    "Agents that change over time (i.e., following the original dataset) "
+                    "are not handled yet internally. Please set freeze_agents=True."
+                )
+            )
+
         self.env_name: str = env_name
         self.scene_name: str = scene_name
         self.scene_info: Scene = deepcopy(scene)
@@ -45,6 +53,14 @@ class SimulationScene:
         self.agents: List[AgentMetadata] = filtering.agent_types(
             agents_present, self.dataset.no_types, self.dataset.only_types
         )
+
+        if len(self.agents) == 0:
+            raise ValueError(
+                (
+                    f"Initial timestep {self.scene_ts} contains no agents after filtering. "
+                    "Please choose another initial timestep."
+                )
+            )
 
         if self.freeze_agents:
             self.scene_info.agent_presence = self.scene_info.agent_presence[

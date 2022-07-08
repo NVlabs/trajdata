@@ -3,7 +3,7 @@ from collections import defaultdict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from trajdata import SceneBatch, AgentType, UnifiedDataset
+from trajdata import AgentType, SceneBatch, UnifiedDataset
 from trajdata.augmentation import NoiseHistories
 from trajdata.visualization.vis import plot_scene_batch
 
