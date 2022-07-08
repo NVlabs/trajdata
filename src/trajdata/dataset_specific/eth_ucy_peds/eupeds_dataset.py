@@ -211,7 +211,7 @@ class EUPedsDataset(RawDataset):
         scene_data: pd.DataFrame = self.dataset_obj[scene_name]
         scene_location: str = get_location(scene_name)
         scene_split: str = self.metadata.scene_split_map[scene_name]
-        scene_length: int = len(scene_data)
+        scene_length: int = scene_data["frame_id"].max().item() + 1
 
         return Scene(
             self.metadata,
