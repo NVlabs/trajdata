@@ -137,7 +137,7 @@ class SceneBatch:
         unique_types: Tensor = torch.unique(self.agent_type)
         return [AgentType(unique_type.item()) for unique_type in unique_types]
 
-    def for_agent_type(self, agent_type: AgentType) -> AgentBatch:
+    def for_agent_type(self, agent_type: AgentType) -> SceneBatch:
         match_type = self.agent_type == agent_type
         return SceneBatch(
             data_idx=self.data_idx[match_type],
