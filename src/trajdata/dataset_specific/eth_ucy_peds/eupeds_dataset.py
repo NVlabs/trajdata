@@ -105,7 +105,7 @@ class EUPedsDataset(RawDataset):
         if verbose:
             print(f"Loading {self.name} dataset...", flush=True)
 
-        self.dataset_obj: Dict[str, Path] = dict()
+        self.dataset_obj: Dict[str, pd.DataFrame] = dict()
         for scene_name in TRAIN_SCENES:
             data_filepath: Path = Path(self.metadata.data_dir) / (scene_name + ".txt")
 
