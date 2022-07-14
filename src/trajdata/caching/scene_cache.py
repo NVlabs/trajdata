@@ -1,8 +1,7 @@
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 from trajdata.augmentation.augmentation import Augmentation
 from trajdata.data_structures.agent import AgentMetadata
@@ -15,7 +14,7 @@ class SceneCache:
         self,
         cache_path: Path,
         scene: Scene,
-        scene_ts: int,
+        scene_ts: Optional[int] = 0,
         augmentations: Optional[List[Augmentation]] = None,
     ) -> None:
         """
@@ -31,13 +30,20 @@ class SceneCache:
         self.scene_dir: Path = self.path / self.scene.env_name / self.scene.name
         self.scene_dir.mkdir(parents=True, exist_ok=True)
 
+    def write_cache_to_disk(self) -> None:
+        """Saves agent data to disk for fast loading later (just like save_agent_data),
+        but using the class attributes for the sources of data and file paths.
+        """
+        raise NotImplementedError()
+
     # AGENT STATE DATA
     @staticmethod
     def save_agent_data(
-        agent_data: pd.DataFrame,
+        agent_data: Any,
         cache_path: Path,
         scene: Scene,
     ) -> None:
+        """Saves agent data to disk for fast loading later."""
         raise NotImplementedError()
 
     def get_value(self, agent_id: str, scene_ts: int, attribute: str) -> float:

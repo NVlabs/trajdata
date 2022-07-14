@@ -50,11 +50,11 @@ def main():
         lon_acc_hist = sim_stats.LongitudinalAccHistogram(bins=np.linspace(0, 10, 11))
         lat_acc_hist = sim_stats.LateralAccHistogram(bins=np.linspace(0, 10, 11))
         jerk_hist = sim_stats.JerkHistogram(
-            bins=np.linspace(0, 40, 41), dt=sim_scene.scene_info.dt
+            bins=np.linspace(0, 40, 41), dt=sim_scene.scene.dt
         )
 
         obs: AgentBatch = sim_scene.reset()
-        for t in trange(1, sim_scene.scene_info.length_timesteps):
+        for t in trange(1, sim_scene.scene.length_timesteps):
             new_xyh_dict: Dict[str, np.ndarray] = dict()
             for idx, agent_name in enumerate(obs.agent_name):
                 curr_yaw = obs.curr_agent_state[idx, -1]
@@ -97,7 +97,7 @@ def main():
         sim_scene.finalize()
         sim_scene.save()
 
-        all_sim_scenes.append(sim_scene.scene_info)
+        all_sim_scenes.append(sim_scene.scene)
 
     dataset.env_cache.save_env_scenes_list(sim_env_name, all_sim_scenes)
 

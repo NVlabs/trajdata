@@ -24,7 +24,7 @@ sim_scene = SimulationScene(
 )
 
 obs: AgentBatch = sim_scene.reset()
-for t in range(1, sim_scene.scene_info.length_timesteps):
+for t in range(1, sim_scene.scene.length_timesteps):
     new_xyh_dict: Dict[str, np.ndarray] = dict()
 
     # Everything inside the forloop just sets

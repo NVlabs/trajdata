@@ -1,13 +1,12 @@
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Type
+from typing import Dict, List, Optional, Type
 
 import numpy as np
 from torch.utils.data import Dataset
 
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import Scene, SceneMetadata
-from trajdata.parallel.temp_cache import TemporaryCache
-from trajdata.utils import agent_utils, scene_utils
+from trajdata.utils import agent_utils
 from trajdata.utils.env_utils import get_raw_dataset
 
 
@@ -21,13 +20,11 @@ class ParallelDatasetPreprocessor(Dataset):
         scene_info_list: List[SceneMetadata],
         envs_dir_dict: Dict[str, str],
         env_cache_path: str,
-        temp_cache_path: str,
         desired_dt: Optional[float],
         cache_class: Type[SceneCache],
         rebuild_cache: bool,
     ) -> None:
         self.env_cache_path = np.array(env_cache_path).astype(np.string_)
-        self.temp_cache_path = np.array(temp_cache_path).astype(np.string_)
         self.desired_dt = desired_dt
         self.cache_class = cache_class
         self.rebuild_cache = rebuild_cache
@@ -56,7 +53,7 @@ class ParallelDatasetPreprocessor(Dataset):
     def __len__(self) -> int:
         return self.data_len
 
-    def __getitem__(self, idx: int) -> Tuple[Path, Path]:
+    def __getitem__(self, idx: int) -> str:
         env_cache_path: Path = Path(str(self.env_cache_path, encoding="utf-8"))
         env_cache: EnvCache = EnvCache(env_cache_path)
 
@@ -78,18 +75,16 @@ class ParallelDatasetPreprocessor(Dataset):
         # stdout with loading messages.
         raw_dataset.load_dataset_obj(verbose=False)
         scene: Scene = agent_utils.get_agent_data(
-            scene_info, raw_dataset, env_cache, self.rebuild_cache, self.cache_class
+            scene_info,
+            raw_dataset,
+            env_cache,
+            self.rebuild_cache,
+            self.cache_class,
+            self.desired_dt,
         )
         raw_dataset.del_dataset_obj()
 
-        orig_scene_path: Path = EnvCache.scene_metadata_path(
-            env_cache.path, scene.env_name, scene.name
+        scene_path: Path = EnvCache.scene_metadata_path(
+            env_cache.path, scene.env_name, scene.name, scene.dt
         )
-        if scene_utils.enforce_desired_dt(scene, self.desired_dt):
-            temp_cache_path: str = str(self.temp_cache_path, encoding="utf-8")
-            return (
-                str(orig_scene_path),
-                str(TemporaryCache(temp_cache_path).cache(scene)),
-            )
-        else:
-            return (str(orig_scene_path), None)
+        return str(scene_path)

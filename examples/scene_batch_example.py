@@ -39,7 +39,6 @@ def main():
         shuffle=True,
         collate_fn=dataset.get_collate_fn(),
         num_workers=4,
-        persistent_workers=True,
     )
 
     batch: SceneBatch

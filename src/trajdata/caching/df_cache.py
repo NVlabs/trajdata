@@ -26,7 +26,7 @@ class DataFrameCache(SceneCache):
         self,
         cache_path: Path,
         scene: Scene,
-        scene_ts: int,
+        scene_ts: Optional[int] = 0,
         augmentations: Optional[List[Augmentation]] = None,
     ) -> None:
         """
@@ -37,10 +37,17 @@ class DataFrameCache(SceneCache):
         """
         super().__init__(cache_path, scene, scene_ts, augmentations)
 
-        self.agent_data_path: Path = self.scene_dir / "agent_data.feather"
-
-        self._load_agent_data()
-        self._get_and_reorder_col_idxs()
+        agent_data_path: Path = self.scene_dir / DataFrameCache._agent_data_file(
+            scene.dt
+        )
+        if not agent_data_path.is_file():
+            # Load the original dt agent data and then
+            # interpolate it to the desired dt.
+            self._load_agent_data(scene.env_metadata.dt)
+            self.interpolate_data(scene.dt)
+        else:
+            # Load the data with the desired dt.
+            self._load_agent_data(scene.dt)
 
         if augmentations:
             dataset_augments: List[DatasetAugmentation] = [
@@ -50,6 +57,14 @@ class DataFrameCache(SceneCache):
             ]
             for aug in dataset_augments:
                 aug.apply(self.scene_data_df)
+
+    @staticmethod
+    def _agent_data_file(scene_dt: float) -> str:
+        return f"agent_data_dt{scene_dt:.2f}.feather"
+
+    @staticmethod
+    def _agent_data_index_file(scene_dt: float) -> str:
+        return f"scene_index_dt{scene_dt:.2f}.pkl"
 
     # AGENT STATE DATA
     def _get_and_reorder_col_idxs(self) -> None:
@@ -90,13 +105,28 @@ class DataFrameCache(SceneCache):
             if extent_name in self.column_dict:
                 self.extent_cols.append(self.column_dict[extent_name])
 
-    def _load_agent_data(self) -> pd.DataFrame:
+    def _load_agent_data(self, scene_dt: float) -> pd.DataFrame:
         self.scene_data_df: pd.DataFrame = pd.read_feather(
-            self.agent_data_path, use_threads=False
+            self.scene_dir / DataFrameCache._agent_data_file(scene_dt),
+            use_threads=False,
         ).set_index(["agent_id", "scene_ts"])
 
-        with open(self.scene_dir / "scene_index.pkl", "rb") as f:
+        with open(
+            self.scene_dir / DataFrameCache._agent_data_index_file(scene_dt), "rb"
+        ) as f:
             self.index_dict: Dict[Tuple[str, int], int] = pickle.load(f)
+
+        self._get_and_reorder_col_idxs()
+
+    def write_cache_to_disk(self) -> None:
+        with open(
+            self.scene_dir / DataFrameCache._agent_data_index_file(self.dt), "wb"
+        ) as f:
+            pickle.dump(self.index_dict, f)
+
+        self.scene_data_df.reset_index().to_feather(
+            self.scene_dir / DataFrameCache._agent_data_file(self.dt)
+        )
 
     @staticmethod
     def save_agent_data(
@@ -110,10 +140,14 @@ class DataFrameCache(SceneCache):
         index_dict: Dict[Tuple[str, int], int] = {
             val: idx for idx, val in enumerate(agent_data.index)
         }
-        with open(scene_cache_dir / "scene_index.pkl", "wb") as f:
+        with open(
+            scene_cache_dir / DataFrameCache._agent_data_index_file(scene.dt), "wb"
+        ) as f:
             pickle.dump(index_dict, f)
 
-        agent_data.reset_index().to_feather(scene_cache_dir / "agent_data.feather")
+        agent_data.reset_index().to_feather(
+            scene_cache_dir / DataFrameCache._agent_data_file(scene.dt)
+        )
 
     def get_value(self, agent_id: str, scene_ts: int, attribute: str) -> float:
         return self.scene_data_df.iat[
@@ -210,6 +244,7 @@ class DataFrameCache(SceneCache):
             interpolated_df.iloc[:, self.column_dict["heading"]]
         )
 
+        self.dt = desired_dt
         self.scene_data_df = interpolated_df
         self.index_dict: Dict[Tuple[str, int], int] = {
             val: idx for idx, val in enumerate(self.scene_data_df.index)

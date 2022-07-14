@@ -40,16 +40,14 @@ class SimulationScene:
 
         self.env_name: str = env_name
         self.scene_name: str = scene_name
-        self.scene_info: Scene = deepcopy(scene)
+        self.scene: Scene = deepcopy(scene)
         self.dataset: UnifiedDataset = dataset
         self.init_scene_ts: int = init_timestep
         self.freeze_agents: bool = freeze_agents
         self.return_dict: bool = return_dict
         self.scene_ts: int = self.init_scene_ts
 
-        agents_present: List[AgentMetadata] = self.scene_info.agent_presence[
-            self.scene_ts
-        ]
+        agents_present: List[AgentMetadata] = self.scene.agent_presence[self.scene_ts]
         self.agents: List[AgentMetadata] = filtering.agent_types(
             agents_present, self.dataset.no_types, self.dataset.only_types
         )
@@ -63,10 +61,10 @@ class SimulationScene:
             )
 
         if self.freeze_agents:
-            self.scene_info.agent_presence = self.scene_info.agent_presence[
+            self.scene.agent_presence = self.scene.agent_presence[
                 : self.init_scene_ts + 1
             ]
-            self.scene_info.agents = self.agents
+            self.scene.agents = self.agents
 
         # Note this order of operations is important, we first instantiate
         # the cache with the copied scene_info + modified agents list.
@@ -77,7 +75,7 @@ class SimulationScene:
         if self.dataset.cache_class == DataFrameCache:
             self.cache: SimulationCache = SimulationDataFrameCache(
                 dataset.cache_path,
-                self.scene_info,
+                self.scene,
                 init_timestep,
                 dataset.augmentations,
             )
@@ -104,16 +102,16 @@ class SimulationScene:
         self.cache.append_state(new_xyh_dict)
 
         if not self.freeze_agents:
-            agents_present: List[AgentMetadata] = self.scene_info.agent_presence[
+            agents_present: List[AgentMetadata] = self.scene.agent_presence[
                 self.scene_ts
             ]
             self.agents: List[AgentMetadata] = filtering.agent_types(
                 agents_present, self.dataset.no_types, self.dataset.only_types
             )
 
-            self.scene_info.agent_presence[self.scene_ts] = self.agents
+            self.scene.agent_presence[self.scene_ts] = self.agents
         else:
-            self.scene_info.agent_presence.append(self.agents)
+            self.scene.agent_presence.append(self.agents)
 
         if return_obs:
             return self.get_obs()
@@ -124,7 +122,7 @@ class SimulationScene:
         agent_data_list: List[AgentBatchElement] = list()
         for agent in self.agents:
             scene_time_agent = SceneTimeAgent(
-                self.scene_info, self.scene_ts, self.agents, agent, self.cache
+                self.scene, self.scene_ts, self.agents, agent, self.cache
             )
             agent_data_list.append(
                 AgentBatchElement(
@@ -174,16 +172,14 @@ class SimulationScene:
         for agent in self.agents:
             agent.last_timestep = self.scene_ts
 
-        self.scene_info.length_timesteps = self.scene_ts + 1
+        self.scene.length_timesteps = self.scene_ts + 1
 
-        self.scene_info.agent_presence = self.scene_info.agent_presence[
-            : self.scene_ts + 1
-        ]
+        self.scene.agent_presence = self.scene.agent_presence[: self.scene_ts + 1]
 
-        self.scene_info.env_metadata.name = self.env_name
-        self.scene_info.env_name = self.env_name
-        self.scene_info.name = self.scene_name
+        self.scene.env_metadata.name = self.env_name
+        self.scene.env_name = self.env_name
+        self.scene.name = self.scene_name
 
     def save(self) -> None:
-        self.dataset.env_cache.save_scene(self.scene_info)
-        self.cache.save_sim_scene(self.scene_info)
+        self.dataset.env_cache.save_scene(self.scene)
+        self.cache.save_sim_scene(self.scene)

@@ -99,6 +99,30 @@ class TestDatasetSizes(unittest.TestCase):
 
         self.assertEqual(len(dataset), 1_155_704)
 
+    def test_interpolation(self):
+        dataset = UnifiedDataset(
+            desired_data=["nusc_mini-mini_train"],
+            centric="agent",
+            desired_dt=0.1,
+            history_sec=(3.2, 3.2),
+            future_sec=(4.8, 4.8),
+            only_types=[AgentType.VEHICLE],
+            incl_robot_future=False,
+            incl_map=False,
+            map_params={
+                "px_per_m": 2,
+                "map_size_px": 224,
+                "offset_frac_xy": (-0.5, 0.0),
+            },
+            num_workers=0,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "nusc_mini": "~/datasets/nuScenes",
+            },
+        )
+
+        self.assertEqual(len(dataset), 11_046)
+
 
 if __name__ == "__main__":
     unittest.main()

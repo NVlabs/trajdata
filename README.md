@@ -83,7 +83,8 @@ Currently, the dataloader supports interfacing with the following datasets:
 
 | Dataset | ID | Splits | Add'l Tags | Description | dt | Maps |
 |---------|----|--------|------------|-------------|----|------|
-| nuScenes | `nusc` | `train`, `val`, `test` | `boston`, `singapore` | nuScenes' training/validation/test splits (700/150/150 scenes) | 0.5s (2Hz) | :white_check_mark: |
+| nuScenes Train/Val | `nusc_trainval` | `train`, `val` | `boston`, `singapore` | nuScenes' training/validation splits (700/150 scenes) | 0.5s (2Hz) | :white_check_mark: |
+| nuScenes Test | `nusc_test` | `test` | `boston`, `singapore` | nuScenes' test split (150 scenes) | 0.5s (2Hz) | :white_check_mark: |
 | nuScenes Mini | `nusc_mini` | `mini_train`, `mini_val` | `boston`, `singapore` | nuScenes mini training/validation splits (8/2 scenes) | 0.5s (2Hz) | :white_check_mark: |
 | Lyft Level 5 Train | `lyft_train` | `train` | `palo_alto` | Lyft Level 5 training data - part 1/2 (8.4 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Train Full | `lyft_train_full` | `train` | `palo_alto` | Lyft Level 5 training data - part 2/2 (70 GB) | 0.1s (10Hz) | :white_check_mark: |
@@ -173,3 +174,4 @@ for t in range(1, sim_scene.scene_info.length_timesteps):
 - Create a method like finalize() which writes all the batch information to a TFRecord/WebDataset/some other format which is (very) fast to read from for higher epoch training.
 - Add more examples to the README.
 - Finish README section about how to add a new dataset.
+

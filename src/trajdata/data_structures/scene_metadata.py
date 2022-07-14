@@ -51,3 +51,6 @@ class Scene:
     ) -> None:
         self.agents = new_agents
         self.agent_presence = new_agent_presence
+
+    def to_metadata(self) -> SceneMetadata:
+        return SceneMetadata(self.env_name, self.name, self.dt, self.raw_data_idx)

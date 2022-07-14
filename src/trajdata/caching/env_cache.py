@@ -13,23 +13,31 @@ class EnvCache:
     def env_is_cached(self, env_name: str) -> bool:
         return (self.path / env_name / "scenes_list.dill").is_file()
 
-    def scene_is_cached(self, env_name: str, scene_name: str) -> bool:
-        return EnvCache.scene_metadata_path(self.path, env_name, scene_name).is_file()
+    def scene_is_cached(self, env_name: str, scene_name: str, scene_dt: float) -> bool:
+        return EnvCache.scene_metadata_path(
+            self.path, env_name, scene_name, scene_dt
+        ).is_file()
 
     @staticmethod
-    def scene_metadata_path(base_path: Path, env_name: str, scene_name: str) -> Path:
-        return base_path / env_name / scene_name / "scene_metadata.dill"
+    def scene_metadata_path(
+        base_path: Path, env_name: str, scene_name: str, scene_dt: float
+    ) -> Path:
+        return (
+            base_path / env_name / scene_name / f"scene_metadata_dt{scene_dt:.2f}.dill"
+        )
 
-    def load_scene(self, env_name: str, scene_name: str) -> Scene:
-        scene_file: Path = EnvCache.scene_metadata_path(self.path, env_name, scene_name)
+    def load_scene(self, env_name: str, scene_name: str, scene_dt: float) -> Scene:
+        scene_file: Path = EnvCache.scene_metadata_path(
+            self.path, env_name, scene_name, scene_dt
+        )
         with open(scene_file, "rb") as f:
             scene: Scene = dill.load(f)
 
         return scene
 
-    def save_scene(self, scene: Scene) -> None:
+    def save_scene(self, scene: Scene) -> Path:
         scene_file: Path = EnvCache.scene_metadata_path(
-            self.path, scene.env_name, scene.name
+            self.path, scene.env_name, scene.name, scene.dt
         )
 
         scene_cache_dir: Path = scene_file.parent
@@ -37,6 +45,8 @@ class EnvCache:
 
         with open(scene_file, "wb") as f:
             dill.dump(scene, f)
+
+        return scene_file
 
     def load_env_scenes_list(self, env_name: str) -> List[NamedTuple]:
         env_cache_dir: Path = self.path / env_name

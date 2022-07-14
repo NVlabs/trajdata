@@ -31,12 +31,6 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
             val: idx for idx, val in enumerate(self.scene_data_df.index)
         }
 
-        # Important to first prune self.scene_data_df before interpolation (since it
-        # will use the agents list from the scene_info object which was modified earlier
-        # in the SimulationScene init.
-        if scene.env_metadata.dt != scene.dt:
-            self.interpolate_data(scene.dt)
-
         # This will remain untouched through simulation, only present for
         # metrics computation later.
         self.original_scene_df: pd.DataFrame = self.scene_data_df.copy()
