@@ -27,6 +27,8 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
     if "eupeds" in dataset_name:
         return EUPedsDataset(dataset_name, data_dir, parallelizable=True)
+    
+    raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 
 def get_raw_datasets(data_dirs: Dict[str, str]) -> List[RawDataset]:
