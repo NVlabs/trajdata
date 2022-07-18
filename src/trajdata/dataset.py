@@ -82,6 +82,7 @@ class UnifiedDataset(Dataset):
         rebuild_maps: bool = False,
         num_workers: int = 0,
         verbose: bool = False,
+        extras: Dict[str, Callable] = {},
     ) -> None:
         """Instantiates a PyTorch Dataset object which aggregates data
         from multiple trajectory forecasting datasets.
@@ -110,6 +111,7 @@ class UnifiedDataset(Dataset):
             rebuild_maps (bool, optional): If True, process and cache maps even if they are already cached. Defaults to False.
             num_workers (int, optional): Number of parallel workers to use for dataset preprocessing and loading. Defaults to 0.
             verbose (bool, optional):  If True, print internal data loading information. Defaults to False.
+            extras (Dict[str, Callable]: Used to add extra data to a batch element. The callable function will be provided with an initialised batch element and should return the data. 
         """
         self.centric: str = centric
         self.desired_dt: float = desired_dt
@@ -141,6 +143,7 @@ class UnifiedDataset(Dataset):
         self.standardize_data = standardize_data
         self.standardize_derivatives = standardize_derivatives
         self.augmentations = augmentations
+        self.extras = extras
         self.verbose = verbose
         self.max_agent_num = max_agent_num
 
@@ -609,7 +612,7 @@ class UnifiedDataset(Dataset):
                 only_types=self.only_types,
                 no_types=self.no_types,
             )
-            return SceneBatchElement(
+            batch_element: SceneBatchElement = SceneBatchElement(
                 scene_cache,
                 idx,
                 scene_time,
@@ -634,7 +637,7 @@ class UnifiedDataset(Dataset):
                 incl_robot_future=self.incl_robot_future,
             )
 
-            return AgentBatchElement(
+            batch_element: AgentBatchElement = AgentBatchElement(
                 scene_cache,
                 idx,
                 scene_time_agent,
@@ -647,3 +650,9 @@ class UnifiedDataset(Dataset):
                 self.standardize_data,
                 self.standardize_derivatives,
             )
+
+        for key, func in self.extras.items():
+            batch_element.extras[key] = func(batch_element)
+
+        return batch_element
+

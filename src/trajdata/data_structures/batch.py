@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import torch
 from torch import Tensor
@@ -38,6 +38,7 @@ class AgentBatch:
     rasters_from_world_tf: Optional[Tensor]
     agents_from_world_tf: Tensor
     scene_ids: Optional[List]
+    extras: Dict[str, Tensor]
 
     def to(self, device) -> None:
         excl_vals = {
@@ -52,11 +53,15 @@ class AgentBatch:
             "num_neigh",
             "robot_fut_len",
             "scene_ids",
+            "extras",
         }
         for val in vars(self).keys():
             tensor_val = getattr(self, val)
             if val not in excl_vals and tensor_val is not None:
                 setattr(self, val, tensor_val.to(device))
+
+        for key, val in self.extras.items():
+            self.extras[key] = val.to(device)
 
     def agent_types(self) -> List[AgentType]:
         unique_types: Tensor = torch.unique(self.agent_type)
@@ -126,6 +131,7 @@ class SceneBatch:
     rasters_from_world_tf: Optional[Tensor]
     centered_agent_from_world_tf: Tensor
     centered_world_from_agent_tf: Tensor
+    extras: Dict[str, Tensor]
 
     def to(self, device) -> None:
         for val in vars(self).keys():
