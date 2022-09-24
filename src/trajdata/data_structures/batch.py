@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import torch
 from torch import Tensor
 
 from trajdata.data_structures.agent import AgentType
+from trajdata.utils.arr_utils import PadDirection
 
 
 @dataclass
@@ -32,12 +32,14 @@ class AgentBatch:
     neigh_fut_extents: Tensor
     neigh_fut_len: Tensor
     robot_fut: Optional[Tensor]
-    robot_fut_len: Tensor
+    robot_fut_len: Optional[Tensor]
     maps: Optional[Tensor]
     maps_resolution: Optional[Tensor]
     rasters_from_world_tf: Optional[Tensor]
     agents_from_world_tf: Tensor
     scene_ids: Optional[List]
+    history_pad_dir: PadDirection
+    extras: Dict[str, Tensor]
 
     def to(self, device) -> None:
         excl_vals = {
@@ -52,11 +54,17 @@ class AgentBatch:
             "num_neigh",
             "robot_fut_len",
             "scene_ids",
+            "history_pad_dir",
+            "extras",
         }
         for val in vars(self).keys():
             tensor_val = getattr(self, val)
             if val not in excl_vals and tensor_val is not None:
-                setattr(self, val, tensor_val.to(device))
+                tensor_val: Tensor
+                setattr(self, val, tensor_val.to(device, non_blocking=True))
+
+        for key, val in self.extras.items():
+            self.extras[key] = val.to(device, non_blocking=True)
 
     def agent_types(self) -> List[AgentType]:
         unique_types: Tensor = torch.unique(self.agent_type)
@@ -89,7 +97,9 @@ class AgentBatch:
             robot_fut=self.robot_fut[match_type]
             if self.robot_fut is not None
             else None,
-            robot_fut_len=self.robot_fut_len[match_type],
+            robot_fut_len=self.robot_fut_len[match_type]
+            if self.robot_fut_len is not None
+            else None,
             maps=self.maps[match_type] if self.maps is not None else None,
             maps_resolution=self.maps_resolution[match_type]
             if self.maps_resolution is not None
@@ -103,6 +113,8 @@ class AgentBatch:
                 for idx, scene_id in enumerate(self.scene_ids)
                 if match_type[idx]
             ],
+            history_pad_dir=self.history_pad_dir,
+            extras={key: val[match_type] for key, val in self.extras},
         )
 
 
@@ -126,12 +138,23 @@ class SceneBatch:
     rasters_from_world_tf: Optional[Tensor]
     centered_agent_from_world_tf: Tensor
     centered_world_from_agent_tf: Tensor
+    scene_ids: Optional[List]
+    history_pad_dir: PadDirection
+    extras: Dict[str, Tensor]
 
     def to(self, device) -> None:
+        excl_vals = {
+            "history_pad_dir",
+            "extras",
+        }
+
         for val in vars(self).keys():
             tensor_val = getattr(self, val)
-            if tensor_val is not None:
+            if val not in excl_vals and tensor_val is not None:
                 setattr(self, val, tensor_val.to(device))
+
+        for key, val in self.extras.items():
+            self.extras[key] = val.to(device)
 
     def agent_types(self) -> List[AgentType]:
         unique_types: Tensor = torch.unique(self.agent_type)
@@ -154,7 +177,9 @@ class SceneBatch:
             robot_fut=self.robot_fut[match_type]
             if self.robot_fut is not None
             else None,
-            robot_fut_len=self.robot_fut_len[match_type],
+            robot_fut_len=self.robot_fut_len[match_type]
+            if self.robot_fut_len is not None
+            else None,
             maps=self.maps[match_type] if self.maps is not None else None,
             maps_resolution=self.maps_resolution[match_type]
             if self.maps_resolution is not None
@@ -164,4 +189,11 @@ class SceneBatch:
             else None,
             centered_agent_from_world_tf=self.centered_agent_from_world_tf[match_type],
             centered_world_from_agent_tf=self.centered_world_from_agent_tf[match_type],
+            scene_ids=[
+                scene_id
+                for idx, scene_id in enumerate(self.scene_ids)
+                if match_type[idx]
+            ],
+            history_pad_dir=self.history_pad_dir,
+            extras={key: val[match_type] for key, val in self.extras},
         )

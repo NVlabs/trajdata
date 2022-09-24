@@ -317,7 +317,7 @@ class EUPedsDataset(RawDataset):
         layer_names: List[str],
         cache_path: Path,
         map_cache_class: Type[SceneCache],
-        resolution: int,
+        resolution: float,
     ) -> None:
         """
         No maps in this dataset!
@@ -325,7 +325,7 @@ class EUPedsDataset(RawDataset):
         pass
 
     def cache_maps(
-        self, cache_path: Path, map_cache_class: Type[SceneCache], resolution: int = 2
+        self, cache_path: Path, map_cache_class: Type[SceneCache], resolution: float
     ) -> None:
         """
         No maps in this dataset!

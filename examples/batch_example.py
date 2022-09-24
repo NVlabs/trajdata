@@ -17,7 +17,7 @@ def main():
         desired_dt=0.1,
         history_sec=(3.2, 3.2),
         future_sec=(4.8, 4.8),
-        only_types=[AgentType.VEHICLE],
+        only_predict=[AgentType.VEHICLE],
         agent_interaction_distances=defaultdict(lambda: 30.0),
         incl_robot_future=False,
         incl_map=True,

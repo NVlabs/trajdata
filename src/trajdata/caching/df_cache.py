@@ -13,8 +13,9 @@ import zarr
 from trajdata.augmentation.augmentation import Augmentation, DatasetAugmentation
 from trajdata.caching.scene_cache import SceneCache
 from trajdata.data_structures.agent import AgentMetadata, FixedExtent
-from trajdata.data_structures.map import Map, MapMetadata
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.maps import RasterizedMap, RasterizedMapMetadata
+from trajdata.proto.vectorized_map_pb2 import VectorizedMap
 from trajdata.utils import arr_utils
 
 STATE_COLS: Final[List[str]] = ["x", "y", "vx", "vy", "ax", "ay"]
@@ -40,7 +41,7 @@ class DataFrameCache(SceneCache):
         agent_data_path: Path = self.scene_dir / DataFrameCache._agent_data_file(
             scene.dt
         )
-        if not agent_data_path.is_file():
+        if not agent_data_path.exists():
             # Load the original dt agent data and then
             # interpolate it to the desired dt.
             self._load_agent_data(scene.env_metadata.dt)
@@ -48,6 +49,9 @@ class DataFrameCache(SceneCache):
         else:
             # Load the data with the desired dt.
             self._load_agent_data(scene.dt)
+
+        # Setting default data transformation parameters.
+        self.reset_transforms()
 
         if augmentations:
             dataset_augments: List[DatasetAugmentation] = [
@@ -98,14 +102,19 @@ class DataFrameCache(SceneCache):
         self.state_cols = (
             self.pos_cols + self.vel_cols + self.acc_cols + self.heading_cols
         )
-        self.state_dim = len(self.state_cols)
+        self._state_dim = len(self.state_cols)
+
+        # While it may seem that obs_dim == _state_dim, obs_dim is meant to
+        # track the output dimension of states (which could differ via
+        # returing sin and cos of heading rather than just heading itself).
+        self.obs_dim = self._state_dim
 
         self.extent_cols: List[int] = list()
         for extent_name in ["length", "width", "height"]:
             if extent_name in self.column_dict:
                 self.extent_cols.append(self.column_dict[extent_name])
 
-    def _load_agent_data(self, scene_dt: float) -> pd.DataFrame:
+    def _load_agent_data(self, scene_dt: float) -> None:
         self.scene_data_df: pd.DataFrame = pd.read_feather(
             self.scene_dir / DataFrameCache._agent_data_file(scene_dt),
             use_threads=False,
@@ -150,57 +159,178 @@ class DataFrameCache(SceneCache):
         )
 
     def get_value(self, agent_id: str, scene_ts: int, attribute: str) -> float:
-        return self.scene_data_df.iat[
-            self.index_dict[(agent_id, scene_ts)], self.column_dict[attribute]
+        col_idx: int = self.column_dict[attribute]
+        value: float = self.scene_data_df.iat[
+            self.index_dict[(agent_id, scene_ts)], col_idx
         ]
 
+        if "y" in attribute:
+            x_value: float = self.scene_data_df.iat[
+                self.index_dict[(agent_id, scene_ts)], col_idx - 1
+            ]
+
+            transformed_pair: np.ndarray = self._transform_pair(
+                np.array([[x_value, value]]), (col_idx - 1, col_idx)
+            )
+            return transformed_pair[0, 1].item()
+        elif "x" in attribute:
+            y_value: float = self.scene_data_df.iat[
+                self.index_dict[(agent_id, scene_ts)], col_idx + 1
+            ]
+
+            transformed_pair: np.ndarray = self._transform_pair(
+                np.array([[value, y_value]]), (col_idx, col_idx + 1)
+            )
+            return transformed_pair[0, 0].item()
+        else:
+            # The 0.0 and 0 here are just placeholders.
+            transformed_pair: np.ndarray = self._transform_pair(
+                np.array([[value, 0.0]]), (col_idx, 0)
+            )
+            return transformed_pair[0, 0].item()
+
     def get_state(self, agent_id: str, scene_ts: int) -> np.ndarray:
-        # Setting copy=True so that the returned state is untouched by any
-        # future transformations (e.g., by a call to the transform_data function).
-        return self.scene_data_df.iloc[
-            self.index_dict[(agent_id, scene_ts)], : self.state_dim
-        ].to_numpy(copy=True)
+        state = self.scene_data_df.iloc[
+            self.index_dict[(agent_id, scene_ts)], : self._state_dim
+        ].to_numpy()
+
+        return self._transform_state(state)
+
+    def get_states(self, agent_ids: List[str], scene_ts: int) -> np.ndarray:
+        row_idxs: List[int] = [
+            self.index_dict[(agent_id, scene_ts)] for agent_id in agent_ids
+        ]
+
+        states = self.scene_data_df.iloc[row_idxs, : self._state_dim].to_numpy()
+
+        return self._transform_state(states)
 
     def transform_data(self, **kwargs) -> None:
         if "shift_mean_to" in kwargs:
             # This standardizes the scene to be relative to the agent being predicted.
-            self.scene_data_df.iloc[:, : self.state_dim] -= kwargs["shift_mean_to"]
+            self._transf_mean = kwargs["shift_mean_to"]
 
         if "rotate_by" in kwargs:
             # This rotates the scene so that the predicted agent's current
             # heading aligns with the x-axis.
             agent_heading: float = kwargs["rotate_by"]
-            self.rot_matrix: np.ndarray = np.array(
+            self._transf_rotmat: np.ndarray = np.array(
                 [
                     [np.cos(agent_heading), -np.sin(agent_heading)],
                     [np.sin(agent_heading), np.cos(agent_heading)],
                 ]
             )
-            self.scene_data_df.iloc[:, self.pos_cols] = (
-                self.scene_data_df.iloc[:, self.pos_cols].to_numpy() @ self.rot_matrix
-            )
-            self.scene_data_df.iloc[:, self.vel_cols] = (
-                self.scene_data_df.iloc[:, self.vel_cols].to_numpy() @ self.rot_matrix
-            )
-            self.scene_data_df.iloc[:, self.acc_cols] = (
-                self.scene_data_df.iloc[:, self.acc_cols].to_numpy() @ self.rot_matrix
-            )
 
         if "sincos_heading" in kwargs:
-            self.scene_data_df["sin_heading"] = np.sin(self.scene_data_df["heading"])
-            self.scene_data_df["cos_heading"] = np.cos(self.scene_data_df["heading"])
-            self.scene_data_df.drop(columns=["heading"], inplace=True)
-            self._get_and_reorder_col_idxs()
+            self._sincos_heading = True
+            self.obs_dim += 1
+
+    def reset_transforms(self) -> None:
+        self._transf_mean: Optional[np.ndarray] = None
+        self._transf_rotmat: Optional[np.ndarray] = None
+        self._sincos_heading: bool = False
+
+        self.obs_dim = self._state_dim
+
+    def _transform_state(self, data: np.ndarray) -> np.ndarray:
+        state: np.ndarray = data.copy()  # Don't want to alter the original data.
+
+        if len(state.shape) == 1:
+            state = state[np.newaxis, :]
+
+        if self._transf_mean is not None:
+            # Shift to zero mean, but leave heading
+            # standardization for if rotation is also requested (below).
+            state[..., :-1] -= self._transf_mean[:-1]
+
+        if self._transf_rotmat is not None:
+            state[..., self.pos_cols] = state[..., self.pos_cols] @ self._transf_rotmat
+            state[..., self.vel_cols] = state[..., self.vel_cols] @ self._transf_rotmat
+            state[..., self.acc_cols] = state[..., self.acc_cols] @ self._transf_rotmat
+            state[..., -1] -= self._transf_mean[-1]
+
+        if self._sincos_heading:
+            sin_heading: np.ndarray = np.sin(state[..., [-1]])
+            cos_heading: np.ndarray = np.cos(state[..., [-1]])
+            state = np.concatenate([state[..., :-1], sin_heading, cos_heading], axis=-1)
+
+        return state[0] if len(data.shape) == 1 else state
+
+    def _transform_pair(
+        self, data: np.ndarray, col_idxs: Tuple[int, int]
+    ) -> np.ndarray:
+        state: np.ndarray = data.copy()  # Don't want to alter the original data.
+
+        if len(state.shape) == 1:
+            state = state[np.newaxis, :]
+
+        if self._transf_mean is not None:
+            state -= self._transf_mean[col_idxs]
+
+        if (
+            self._transf_rotmat is not None
+            and col_idxs[0] in self.pos_cols + self.vel_cols + self.acc_cols
+        ):
+            state = state @ self._transf_rotmat
+
+        return state[0] if len(data.shape) == 1 else state
+
+    def _upsample_data(
+        self, new_index: pd.MultiIndex, upsample_dt_ratio: float, method: str
+    ) -> pd.DataFrame:
+        upsample_dt_factor: int = int(upsample_dt_ratio)
+
+        interpolated_df: pd.DataFrame = pd.DataFrame(
+            index=new_index, columns=self.scene_data_df.columns
+        )
+        interpolated_df = interpolated_df.astype(self.scene_data_df.dtypes.to_dict())
+
+        scene_data: np.ndarray = self.scene_data_df.to_numpy()
+        unwrapped_heading: np.ndarray = np.unwrap(self.scene_data_df["heading"])
+
+        # Getting the data initially in the new df, making sure to unwrap angles above
+        # in preparation for interpolation.
+        scene_data_idxs: np.ndarray = np.nonzero(
+            new_index.get_level_values("scene_ts") % upsample_dt_factor == 0
+        )[0]
+        interpolated_df.iloc[scene_data_idxs] = scene_data
+        interpolated_df.iloc[
+            scene_data_idxs, self.column_dict["heading"]
+        ] = unwrapped_heading
+
+        # Interpolation.
+        interpolated_df.interpolate(method=method, limit_area="inside", inplace=True)
+
+        # Wrapping angles back to [-pi, pi).
+        interpolated_df.iloc[:, self.column_dict["heading"]] = arr_utils.angle_wrap(
+            interpolated_df.iloc[:, self.column_dict["heading"]]
+        )
+
+        return interpolated_df
+
+    def _downsample_data(
+        self, new_index: pd.MultiIndex, downsample_dt_ratio: float
+    ) -> pd.DataFrame:
+        downsample_dt_factor: int = int(downsample_dt_ratio)
+
+        subsample_index: pd.MultiIndex = new_index.set_levels(
+            new_index.levels[1] * downsample_dt_factor, level=1
+        )
+
+        subsampled_df: pd.DataFrame = self.scene_data_df.reindex(
+            index=subsample_index
+        ).set_index(new_index)
+
+        return subsampled_df
 
     def interpolate_data(self, desired_dt: float, method: str = "linear") -> None:
-        dt_ratio: float = self.scene.env_metadata.dt / desired_dt
-        if not dt_ratio.is_integer():
+        upsample_dt_ratio: float = self.scene.env_metadata.dt / desired_dt
+        downsample_dt_ratio: float = desired_dt / self.scene.env_metadata.dt
+        if not upsample_dt_ratio.is_integer() and not downsample_dt_ratio.is_integer():
             raise ValueError(
                 f"{str(self.scene)}'s dt of {self.scene.dt}s "
-                f"is not divisible by the desired dt {desired_dt}s."
+                f"is not integer divisible by the desired dt {desired_dt}s."
             )
-
-        dt_factor: int = int(dt_ratio)
 
         agent_info_dict: Dict[str, AgentMetadata] = {
             agent.name: agent for agent in self.scene.agents
@@ -218,31 +348,10 @@ class DataFrameCache(SceneCache):
             names=["agent_id", "scene_ts"],
         )
 
-        interpolated_df: pd.DataFrame = pd.DataFrame(
-            index=new_index, columns=self.scene_data_df.columns
-        )
-        interpolated_df = interpolated_df.astype(self.scene_data_df.dtypes.to_dict())
-
-        scene_data: np.ndarray = self.scene_data_df.to_numpy()
-        unwrapped_heading: np.ndarray = np.unwrap(self.scene_data_df["heading"])
-
-        # Getting the data initially in the new df, making sure to unwrap angles above
-        # in preparation for interpolation.
-        scene_data_idxs: np.ndarray = np.nonzero(
-            new_index.get_level_values("scene_ts") % dt_factor == 0
-        )[0]
-        interpolated_df.iloc[scene_data_idxs] = scene_data
-        interpolated_df.iloc[
-            scene_data_idxs, self.column_dict["heading"]
-        ] = unwrapped_heading
-
-        # Interpolation.
-        interpolated_df.interpolate(method=method, limit_area="inside", inplace=True)
-
-        # Wrapping angles back to [-pi, pi).
-        interpolated_df.iloc[:, self.column_dict["heading"]] = arr_utils.angle_wrap(
-            interpolated_df.iloc[:, self.column_dict["heading"]]
-        )
+        if upsample_dt_ratio >= 1:
+            interpolated_df = self._upsample_data(new_index, upsample_dt_ratio, method)
+        elif downsample_dt_ratio >= 1:
+            interpolated_df = self._downsample_data(new_index, downsample_dt_ratio)
 
         self.dt = desired_dt
         self.scene_data_df = interpolated_df
@@ -285,7 +394,12 @@ class DataFrameCache(SceneCache):
         else:
             agent_extent_np = agent_history_df.iloc[:, self.extent_cols].to_numpy()
 
-        return agent_history_df.iloc[:, : self.state_dim].to_numpy(), agent_extent_np
+        return (
+            self._transform_state(
+                agent_history_df.iloc[:, : self._state_dim].to_numpy()
+            ),
+            agent_extent_np,
+        )
 
     def get_agent_future(
         self,
@@ -297,7 +411,7 @@ class DataFrameCache(SceneCache):
         # took care of it.
         if scene_ts >= agent_info.last_timestep:
             # Extent shape = 3
-            return np.zeros((0, self.state_dim)), np.zeros((0, 3))
+            return np.zeros((0, self.obs_dim)), np.zeros((0, 3))
 
         first_index_incl: int = self.index_dict[(agent_info.name, scene_ts + 1)]
         last_index_incl: int
@@ -323,13 +437,12 @@ class DataFrameCache(SceneCache):
         else:
             agent_extent_np = agent_future_df.iloc[:, self.extent_cols].to_numpy()
 
-        return agent_future_df.iloc[:, : self.state_dim].to_numpy(), agent_extent_np
-
-    def get_positions_at(
-        self, scene_ts: int, agents: List[AgentMetadata]
-    ) -> np.ndarray:
-        rows = [self.index_dict[(agent.name, scene_ts)] for agent in agents]
-        return self.scene_data_df.iloc[rows, self.pos_cols].to_numpy()
+        return (
+            self._transform_state(
+                agent_future_df.iloc[:, : self._state_dim].to_numpy()
+            ),
+            agent_extent_np,
+        )
 
     def get_agents_history(
         self,
@@ -360,7 +473,9 @@ class DataFrameCache(SceneCache):
 
         neighbor_history_lens_np = last_index_incl - first_index_incl + 1
 
-        neighbor_histories_np = neighbor_data_df.iloc[:, : self.state_dim].to_numpy()
+        neighbor_histories_np = self._transform_state(
+            neighbor_data_df.iloc[:, : self._state_dim].to_numpy()
+        )
         # The last one will always be empty because of what cumsum returns.
         neighbor_histories: List[np.ndarray] = np.vsplit(
             neighbor_histories_np, neighbor_history_lens_np.cumsum()
@@ -424,7 +539,9 @@ class DataFrameCache(SceneCache):
 
         neighbor_future_lens_np = last_index_incl - first_index_incl + 1
 
-        neighbor_futures_np = neighbor_data_df.iloc[:, : self.state_dim].to_numpy()
+        neighbor_futures_np = self._transform_state(
+            neighbor_data_df.iloc[:, : self._state_dim].to_numpy()
+        )
         # The last one will always be empty because of what cumsum returns.
         neighbor_futures: List[np.ndarray] = np.vsplit(
             neighbor_futures_np, neighbor_future_lens_np.cumsum()
@@ -459,50 +576,94 @@ class DataFrameCache(SceneCache):
 
     @staticmethod
     def are_maps_cached(cache_path: Path, env_name: str) -> bool:
-        return DataFrameCache.get_maps_path(cache_path, env_name).is_dir()
+        return DataFrameCache.get_maps_path(cache_path, env_name).exists()
 
     @staticmethod
-    def is_map_cached(cache_path: Path, env_name: str, map_name: str) -> bool:
+    def get_map_paths(
+        cache_path: Path, env_name: str, map_name: str, resolution: float
+    ) -> Tuple[Path, Path, Path, Path]:
         maps_path: Path = DataFrameCache.get_maps_path(cache_path, env_name)
-        metadata_file: Path = maps_path / f"{map_name}_metadata.dill"
-        map_file: Path = maps_path / f"{map_name}.zarr"
-        return maps_path.is_dir() and metadata_file.is_file() and map_file.is_file()
+
+        vector_map_path: Path = maps_path / f"{map_name}.pb"
+        raster_map_path: Path = maps_path / f"{map_name}_{resolution:.2f}px_m.zarr"
+        raster_metadata_path: Path = maps_path / f"{map_name}_{resolution:.2f}px_m.dill"
+
+        return maps_path, vector_map_path, raster_map_path, raster_metadata_path
 
     @staticmethod
-    def cache_map(cache_path: Path, map_obj: Map, env_name: str) -> None:
-        maps_path: Path = DataFrameCache.get_maps_path(cache_path, env_name)
+    def is_map_cached(
+        cache_path: Path, env_name: str, map_name: str, resolution: float
+    ) -> bool:
+        (
+            maps_path,
+            vector_map_path,
+            raster_map_path,
+            raster_metadata_path,
+        ) = DataFrameCache.get_map_paths(cache_path, env_name, map_name, resolution)
+        return (
+            maps_path.exists()
+            and vector_map_path.exists()
+            and raster_metadata_path.exists()
+            and raster_map_path.exists()
+        )
+
+    @staticmethod
+    def cache_map(
+        cache_path: Path, vec_map: VectorizedMap, map_obj: RasterizedMap, env_name: str
+    ) -> None:
+        (
+            maps_path,
+            vector_map_path,
+            raster_map_path,
+            raster_metadata_path,
+        ) = DataFrameCache.get_map_paths(
+            cache_path, env_name, map_obj.metadata.name, map_obj.metadata.resolution
+        )
+
+        # Ensuring the maps directory exists.
         maps_path.mkdir(parents=True, exist_ok=True)
 
-        map_file: Path = maps_path / f"{map_obj.metadata.name}.zarr"
-        zarr.save(map_file, map_obj.data)
+        # Saving the vectorized map data.
+        with open(vector_map_path, "wb") as f:
+            f.write(vec_map.SerializeToString())
 
-        metadata_file: Path = maps_path / f"{map_obj.metadata.name}_metadata.dill"
-        with open(metadata_file, "wb") as f:
+        # Saving the rasterized map data.
+        zarr.save(raster_map_path, map_obj.data)
+
+        # Saving the rasterized map metadata.
+        with open(raster_metadata_path, "wb") as f:
             dill.dump(map_obj.metadata, f)
 
     @staticmethod
     def cache_map_layers(
         cache_path: Path,
-        map_info: MapMetadata,
+        map_info: RasterizedMapMetadata,
         layer_fn: Callable[[str], np.ndarray],
         env_name: str,
     ) -> None:
-        maps_path: Path = DataFrameCache.get_maps_path(cache_path, env_name)
+        (
+            maps_path,
+            _,
+            raster_map_path,
+            raster_metadata_path,
+        ) = DataFrameCache.get_map_paths(
+            cache_path, env_name, map_info.name, map_info.resolution
+        )
+
+        # Ensuring the maps directory exists.
         maps_path.mkdir(parents=True, exist_ok=True)
 
-        map_file: Path = maps_path / f"{map_info.name}.zarr"
-        disk_data = zarr.open_array(map_file, mode="w", shape=map_info.shape)
+        disk_data = zarr.open_array(raster_map_path, mode="w", shape=map_info.shape)
         for idx, layer_name in enumerate(map_info.layers):
             disk_data[idx] = layer_fn(layer_name)
 
-        metadata_file: Path = maps_path / f"{map_info.name}_metadata.dill"
-        with open(metadata_file, "wb") as f:
+        with open(raster_metadata_path, "wb") as f:
             dill.dump(map_info, f)
 
     def pad_map_patch(
         self,
         patch: np.ndarray,
-        # top, bot, left, right
+        #                 top, bot, left, right
         patch_sides: Tuple[int, int, int, int],
         patch_size: int,
         map_dims: Tuple[int, int, int],
@@ -535,17 +696,37 @@ class DataFrameCache(SceneCache):
         world_x: float,
         world_y: float,
         desired_patch_size: int,
-        resolution: int,
+        resolution: float,
         offset_xy: Tuple[float, float],
         agent_heading: float,
         return_rgb: bool,
         rot_pad_factor: float = 1.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        maps_path: Path = DataFrameCache.get_maps_path(self.path, self.scene.env_name)
+        no_map_val: float = 0.0,
+    ) -> Tuple[np.ndarray, np.ndarray, bool]:
+        (
+            maps_path,
+            _,
+            raster_map_path,
+            raster_metadata_path,
+        ) = DataFrameCache.get_map_paths(
+            self.path, self.scene.env_name, self.scene.location, resolution
+        )
+        if not maps_path.exists():
+            # This dataset (or location) does not have any maps,
+            # so we return an empty map.
+            patch_size: int = ceil((rot_pad_factor * desired_patch_size) / 2) * 2
 
-        metadata_file: Path = maps_path / f"{self.scene.location}_metadata.dill"
-        with open(metadata_file, "rb") as f:
-            map_info: MapMetadata = dill.load(f)
+            return (
+                np.full(
+                    (1 if not return_rgb else 3, patch_size, patch_size),
+                    fill_value=no_map_val,
+                ),
+                np.eye(3),
+                False,
+            )
+
+        with open(raster_metadata_path, "rb") as f:
+            map_info: RasterizedMapMetadata = dill.load(f)
 
         raster_from_world_tf: np.ndarray = map_info.map_from_world
         map_coords: np.ndarray = map_info.map_from_world @ np.array(
@@ -564,6 +745,9 @@ class DataFrameCache(SceneCache):
             @ raster_from_world_tf
         )
 
+        # This first size is how much of the map we
+        # need to extract to match the requested metric size (meters x meters) of
+        # the patch.
         data_patch_size: int = ceil(
             desired_patch_size * map_info.resolution / resolution
         )
@@ -599,16 +783,17 @@ class DataFrameCache(SceneCache):
                 @ raster_from_world_tf
             )
 
-        # Ensuring the size is divisible by two so that the // 2 below does not
-        # chop any information off.
+        # This is the size of the patch taking into account expansion to allow for
+        # rotation to match the agent's heading. We also ensure the final size is
+        # divisible by two so that the // 2 below does not chop any information off.
         data_with_rot_pad_size: int = ceil((rot_pad_factor * data_patch_size) / 2) * 2
 
-        map_file: Path = maps_path / f"{map_info.name}.zarr"
-        disk_data = zarr.open_array(map_file, mode="r")
+        disk_data = zarr.open_array(raster_map_path, mode="r")
 
         map_x = round(map_x)
         map_y = round(map_y)
 
+        # Half of the patch's side length.
         half_extent: int = data_with_rot_pad_size // 2
 
         top: int = map_y - half_extent
@@ -662,4 +847,4 @@ class DataFrameCache(SceneCache):
                 @ raster_from_world_tf
             )
 
-        return data_patch, raster_from_world_tf
+        return data_patch, raster_from_world_tf, True

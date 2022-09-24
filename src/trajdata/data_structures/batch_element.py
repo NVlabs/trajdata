@@ -5,9 +5,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from trajdata.caching import SceneCache
-from trajdata.data_structures.agent import Agent, AgentMetadata, AgentType, FixedExtent
-from trajdata.data_structures.map_patch import MapPatch
+from trajdata.data_structures.agent import AgentMetadata, AgentType
 from trajdata.data_structures.scene import SceneTime, SceneTimeAgent
+from trajdata.maps import RasterizedMapPatch
 
 
 class AgentBatchElement:
@@ -34,6 +34,8 @@ class AgentBatchElement:
         self.data_index: int = data_index
         self.dt: float = scene_time_agent.scene.dt
         self.scene_ts: int = scene_time_agent.ts
+        self.history_sec = history_sec
+        self.future_sec = future_sec
 
         agent_info: AgentMetadata = scene_time_agent.agent
         self.agent_name: str = agent_info.name
@@ -125,11 +127,14 @@ class AgentBatchElement:
             self.robot_future_len: int = self.robot_future_np.shape[0] - 1
 
         ### MAP ###
-        self.map_patch: Optional[MapPatch] = None
+        self.map_patch: Optional[RasterizedMapPatch] = None
         if incl_map:
             self.map_patch = self.get_agent_map_patch(map_params)
 
         self.scene_id = scene_time_agent.scene.name
+
+        # Will be optionally populated by the user's provided functions.
+        self.extras: Dict[str, np.ndarray] = dict()
 
     def get_agent_history(
         self,
@@ -246,16 +251,17 @@ class AgentBatchElement:
         )
         return robot_curr_and_fut_np
 
-    def get_agent_map_patch(self, patch_params: Dict[str, int]) -> MapPatch:
+    def get_agent_map_patch(self, patch_params: Dict[str, int]) -> RasterizedMapPatch:
         world_x, world_y = self.curr_agent_state_np[:2]
         desired_patch_size: int = patch_params["map_size_px"]
-        resolution: int = patch_params["px_per_m"]
+        resolution: float = patch_params["px_per_m"]
         offset_xy: Tuple[float, float] = patch_params.get("offset_frac_xy", (0.0, 0.0))
         return_rgb: bool = patch_params.get("return_rgb", True)
+        no_map_fill_val: float = patch_params.get("no_map_fill_value", 0.0)
 
         if self.standardize_data:
             heading = self.curr_agent_state_np[-1]
-            patch_data, raster_from_world_tf = self.cache.load_map_patch(
+            patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
                 world_x,
                 world_y,
                 desired_patch_size,
@@ -264,10 +270,11 @@ class AgentBatchElement:
                 heading,
                 return_rgb,
                 rot_pad_factor=sqrt(2),
+                no_map_val=no_map_fill_val,
             )
         else:
             heading = 0.0
-            patch_data, raster_from_world_tf = self.cache.load_map_patch(
+            patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
                 world_x,
                 world_y,
                 desired_patch_size,
@@ -275,14 +282,16 @@ class AgentBatchElement:
                 offset_xy,
                 heading,
                 return_rgb,
+                no_map_val=no_map_fill_val,
             )
 
-        return MapPatch(
+        return RasterizedMapPatch(
             data=patch_data,
             rot_angle=heading,
             crop_size=desired_patch_size,
             resolution=resolution,
             raster_from_world_tf=raster_from_world_tf,
+            has_data=has_data,
         )
 
 
@@ -382,12 +391,12 @@ class SceneBatchElement:
         ) = self.get_agents_future(future_sec, nearby_agents)
 
         ### MAP ###
-        self.map_patches: Optional[MapPatch] = None
+        self.map_patches: Optional[RasterizedMapPatch] = None
         if incl_map:
             self.map_patches = self.get_agents_map_patch(
                 map_params, self.agent_histories
             )
-
+        self.scene_id = scene_time.scene.name
         ### ROBOT DATA ###
         self.robot_future_np: Optional[np.ndarray] = None
 
@@ -400,6 +409,11 @@ class SceneBatchElement:
             # (whereas the above returns the current + future, yielding
             # one more timestep).
             self.robot_future_len: int = self.robot_future_np.shape[0] - 1
+
+        self.scene_id = scene_time.scene.name
+
+        # Will be optionally populated by the user's provided functions.
+        self.extras: Dict[str, np.ndarray] = dict()
 
     def get_nearby_agents(
         self,
@@ -461,68 +475,96 @@ class SceneBatchElement:
 
     def get_agents_map_patch(
         self, patch_params: Dict[str, int], agent_histories: List[np.ndarray]
-    ) -> List[MapPatch]:
+    ) -> List[RasterizedMapPatch]:
         world_x, world_y = self.centered_agent_state_np[:2]
         heading = self.centered_agent_state_np[-1]
         desired_patch_size: int = patch_params["map_size_px"]
-        resolution: int = patch_params["px_per_m"]
+        resolution: float = patch_params["px_per_m"]
         offset_xy: Tuple[float, float] = patch_params.get("offset_frac_xy", (0.0, 0.0))
         return_rgb: bool = patch_params.get("return_rgb", True)
+        no_map_fill_val: float = patch_params.get("no_map_fill_value", 0.0)
 
-        if len(self.cache.heading_cols) == 1:
+        if self.cache._sincos_heading:
+            if len(self.cache.heading_cols) == 2:
+                heading_sin_idx, heading_cos_idx = self.cache.heading_cols
+            else:
+                heading_sin_idx, heading_cos_idx = (
+                    self.cache.heading_cols[0],
+                    self.cache.heading_cols[0] + 1,
+                )
+            sincos = True
+
+        else:
             heading_idx = self.cache.heading_cols[0]
             sincos = False
-        else:
-            heading_sin_idx, heading_cos_idx = self.cache.heading_cols
-            sincos = True
+
         x_idx, y_idx = self.cache.pos_cols
 
         map_patches = list()
-        for agent_his in agent_histories:
-            if self.standardize_data:
-                if sincos:
-                    agent_heading = (
-                        np.arctan2(
-                            agent_his[-1, heading_sin_idx],
-                            agent_his[-1, heading_cos_idx],
-                        )
-                        + heading
-                    )
-                else:
-                    agent_heading = agent_his[-1, heading_idx] + heading
 
-                patch_data, raster_from_world_tf = self.cache.load_map_patch(
-                    world_x + agent_his[-1, x_idx],
-                    world_y + agent_his[-1, y_idx],
+        curr_state = [state[-1] for state in agent_histories]
+        curr_state = np.stack(curr_state)
+        if self.standardize_data:
+            Rot = np.array(
+                [
+                    [np.cos(heading), -np.sin(heading)],
+                    [np.sin(heading), np.cos(heading)],
+                ]
+            )
+            if sincos:
+                agent_heading = (
+                    np.arctan2(
+                        curr_state[:, heading_sin_idx], curr_state[:, heading_cos_idx]
+                    )
+                    + heading
+                )
+            else:
+                agent_heading = curr_state[:, heading_idx] + heading
+            world_dxy = curr_state[:, [x_idx, y_idx]] @ (Rot.T)
+            for i in range(curr_state.shape[0]):
+                patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
+                    world_x + world_dxy[i, 0],
+                    world_y + world_dxy[i, 1],
                     desired_patch_size,
                     resolution,
                     offset_xy,
-                    agent_heading,
+                    agent_heading[i],
                     return_rgb,
                     rot_pad_factor=sqrt(2),
+                    no_map_val=no_map_fill_val,
                 )
-
-            else:
-                agent_heading = 0.0
-                patch_data, raster_from_world_tf = self.cache.load_map_patch(
-                    agent_his[-1, x_idx],
-                    agent_his[-1, y_idx],
+                map_patches.append(
+                    RasterizedMapPatch(
+                        data=patch_data,
+                        rot_angle=agent_heading[i],
+                        crop_size=desired_patch_size,
+                        resolution=resolution,
+                        raster_from_world_tf=raster_from_world_tf,
+                        has_data=has_data,
+                    )
+                )
+        else:
+            for i in range(curr_state.shape[0]):
+                patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
+                    curr_state[i, x_idx],
+                    curr_state[i, y_idx],
                     desired_patch_size,
                     resolution,
                     offset_xy,
-                    agent_heading,
+                    0,
                     return_rgb,
+                    no_map_val=no_map_fill_val,
                 )
-
-            map_patches.append(
-                MapPatch(
-                    data=patch_data,
-                    rot_angle=agent_heading,
-                    crop_size=desired_patch_size,
-                    resolution=resolution,
-                    raster_from_world_tf=raster_from_world_tf,
+                map_patches.append(
+                    RasterizedMapPatch(
+                        data=patch_data,
+                        rot_angle=0,
+                        crop_size=desired_patch_size,
+                        resolution=resolution,
+                        raster_from_world_tf=raster_from_world_tf,
+                        has_data=has_data,
+                    )
                 )
-            )
 
         return map_patches
 

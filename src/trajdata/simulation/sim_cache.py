@@ -11,10 +11,10 @@ class SimulationCache(SceneCache):
     def reset(self) -> None:
         raise NotImplementedError()
 
-    def transform_data(self, **kwargs) -> None:
+    def append_state(self, xyh_dict: Dict[str, np.ndarray]) -> None:
         raise NotImplementedError()
 
-    def append_state(self, xyh_dict: Dict[str, np.ndarray]) -> None:
+    def add_agents(self, agent_data: List[Tuple]) -> None:
         raise NotImplementedError()
 
     def save_sim_scene(self) -> None:

@@ -6,7 +6,7 @@ import numpy as np
 from trajdata import filtering
 from trajdata.augmentation import BatchAugmentation
 from trajdata.caching.df_cache import DataFrameCache
-from trajdata.data_structures.agent import AgentMetadata, VariableExtent
+from trajdata.data_structures.agent import AgentMetadata, FixedExtent, VariableExtent
 from trajdata.data_structures.batch import AgentBatch
 from trajdata.data_structures.batch_element import AgentBatchElement
 from trajdata.data_structures.collation import agent_collate_fn
@@ -140,14 +140,15 @@ class SimulationScene:
                 )
             )
 
-            # Need to do reset for each agent since each
+            # Need to reset transformations for each agent since each
             # AgentBatchElement transforms (standardizes) the cache.
-            self.cache.reset()
+            self.cache.reset_transforms()
 
         if collate:
             return agent_collate_fn(
                 agent_data_list,
                 return_dict=self.return_dict,
+                pad_format="outside",
                 batch_augments=self.batch_augments,
             )
         else:
@@ -183,3 +184,23 @@ class SimulationScene:
     def save(self) -> None:
         self.dataset.env_cache.save_scene(self.scene)
         self.cache.save_sim_scene(self.scene)
+
+    def add_new_agents(self, agent_data: List[Tuple]):
+        existing_agent_names = [agent.name for agent in self.agents]
+        agent_data = [
+            agent for agent in agent_data if agent[0] not in existing_agent_names
+        ]
+        if len(agent_data) > 0:
+            self.cache.add_agents(agent_data)
+            for data in agent_data:
+                name, state, ts0, agent_type, extent = data
+                metadata = AgentMetadata(
+                    name=name,
+                    agent_type=agent_type,
+                    first_timestep=ts0,
+                    last_timestep=ts0 + state.shape[0] - 1,
+                    extent=FixedExtent(
+                        length=extent[0], width=extent[1], height=extent[2]
+                    ),
+                )
+                self.agents.append(metadata)

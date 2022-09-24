@@ -20,14 +20,16 @@ except ModuleNotFoundError:
 
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nusc" in dataset_name:
-        return NuscDataset(dataset_name, data_dir, parallelizable=False)
+        return NuscDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
 
     if "lyft" in dataset_name:
-        return LyftDataset(dataset_name, data_dir, parallelizable=True)
+        return LyftDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     if "eupeds" in dataset_name:
-        return EUPedsDataset(dataset_name, data_dir, parallelizable=True)
-    
+        return EUPedsDataset(
+            dataset_name, data_dir, parallelizable=True, has_maps=False
+        )
+
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 

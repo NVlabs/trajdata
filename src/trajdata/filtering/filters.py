@@ -7,12 +7,15 @@ from trajdata.data_structures.agent import AgentMetadata, AgentType
 def agent_types(
     agents: List[AgentMetadata], no_types: Set[AgentType], only_types: Set[AgentType]
 ) -> List[AgentMetadata]:
+    agents_list: List[AgentMetadata] = agents
+    
     if no_types is not None:
-        return [agent for agent in agents if agent.type not in no_types]
-    elif only_types is not None:
-        return [agent for agent in agents if agent.type in only_types]
-    else:
-        return agents
+        agents_list = [agent for agent in agents_list if agent.type not in no_types]
+    
+    if only_types is not None:
+        agents_list = [agent for agent in agents_list if agent.type in only_types]
+    
+    return agents_list
 
 
 def all_agents_excluded_types(
@@ -36,7 +39,18 @@ def get_valid_ts(
     dt: float,
     history_sec: Tuple[Optional[float], Optional[float]],
     future_sec: Tuple[Optional[float], Optional[float]],
-) -> bool:
+) -> Tuple[int, int]:
+    """The returned timesteps are both inclusive.
+
+    Args:
+        agent_info (AgentMetadata): _description_
+        dt (float): _description_
+        history_sec (Tuple[Optional[float], Optional[float]]): _description_
+        future_sec (Tuple[Optional[float], Optional[float]]): _description_
+
+    Returns:
+        Tuple[int, int]: _description_
+    """
     first_valid_ts = agent_info.first_timestep
     if history_sec[0] is not None:
         min_history = ceil(history_sec[0] / dt)
@@ -47,7 +61,7 @@ def get_valid_ts(
         min_future = ceil(future_sec[0] / dt)
         last_valid_ts -= min_future
 
-    return list(range(first_valid_ts, last_valid_ts + 1))
+    return first_valid_ts, last_valid_ts
 
 
 def satisfies_history(

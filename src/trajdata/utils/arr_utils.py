@@ -1,6 +1,74 @@
+from enum import IntEnum
+from typing import List, Optional
+
 import numpy as np
 import torch
 from torch import Tensor
+from torch.nn.utils.rnn import pad_sequence
+
+
+class PadDirection(IntEnum):
+    BEFORE = 0
+    AFTER = 1
+
+
+def convert_with_dir(
+    seq: np.ndarray, dtype: torch.dtype, time_dim: int, pad_dir: PadDirection
+) -> Tensor:
+    if pad_dir == PadDirection.BEFORE:
+        return torch.as_tensor(seq, dtype=dtype).flip(time_dim)
+
+    return torch.as_tensor(seq, dtype=dtype)
+
+
+def pad_with_dir(
+    seq_list: List[Tensor], time_dim: int, pad_dir: PadDirection, **kwargs
+) -> Tensor:
+    if pad_dir == PadDirection.BEFORE:
+        return pad_sequence(
+            seq_list,
+            **kwargs,
+        ).flip(time_dim)
+
+    return pad_sequence(
+        seq_list,
+        **kwargs,
+    )
+
+
+def pad_sequences(
+    seq_list: List[np.ndarray],
+    dtype: torch.dtype,
+    time_dim: int,
+    pad_dir: PadDirection,
+    **kwargs,
+) -> Tensor:
+    return pad_with_dir(
+        [convert_with_dir(seq, dtype, time_dim, pad_dir) for seq in seq_list],
+        time_dim,
+        pad_dir,
+        **kwargs,
+    )
+
+
+def mask_up_to(lens: Tensor, delta: int = 0, max_len: Optional[int] = None) -> Tensor:
+    """Exclusive.
+
+    Args:
+        lens (Tensor): _description_
+        delta (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        Tensor: _description_
+    """
+    if max_len is None:
+        max_len = lens.max()
+
+    arange_t: Tensor = torch.arange(
+        max_len, dtype=lens.dtype, device=lens.device
+    ).expand(*lens.shape, -1)
+
+    return arange_t < (lens.unsqueeze(-1) + delta)
 
 
 def vrange(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:

@@ -7,7 +7,7 @@ from torch import Tensor
 
 from trajdata.data_structures.agent import AgentType
 from trajdata.data_structures.batch import AgentBatch, SceneBatch
-from trajdata.data_structures.map import Map
+from trajdata.maps import RasterizedMap
 
 
 def plot_agent_batch(
@@ -52,7 +52,7 @@ def plot_agent_batch(
         ].item()
 
         ax.imshow(
-            Map.to_img(
+            RasterizedMap.to_img(
                 batch.maps[batch_idx].cpu(),
                 # [[0], [1], [2]]
                 # [[0, 1, 2], [3, 4], [5, 6]],
@@ -176,7 +176,7 @@ def plot_scene_batch(
         ].item()
 
         ax.imshow(
-            Map.to_img(
+            RasterizedMap.to_img(
                 batch.maps[batch_idx, centered_agent_id].cpu(),
                 # [[0], [1], [2]]
                 # [[0, 1, 2], [3, 4], [5, 6]],

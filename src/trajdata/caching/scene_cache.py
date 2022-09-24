@@ -5,8 +5,9 @@ import numpy as np
 
 from trajdata.augmentation.augmentation import Augmentation
 from trajdata.data_structures.agent import AgentMetadata
-from trajdata.data_structures.map import Map, MapMetadata
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.maps import RasterizedMap, RasterizedMapMetadata
+from trajdata.proto.vectorized_map_pb2 import VectorizedMap
 
 
 class SceneCache:
@@ -58,9 +59,22 @@ class SceneCache:
         """
         raise NotImplementedError()
 
+    def get_states(self, agent_ids: List[str], scene_ts: int) -> np.ndarray:
+        """
+        Get multiple agents' states at a specific timestep.
+        """
+        raise NotImplementedError()
+
     def transform_data(self, **kwargs) -> None:
         """
         Transform the data before accessing it later, e.g., to make the mean zero or rotate the scene around an agent.
+        This can either be done in this function call or just stored for later lazy application.
+        """
+        raise NotImplementedError()
+
+    def reset_transforms(self) -> None:
+        """
+        Transform the data back to its original coordinate system.
         This can either be done in this function call or just stored for later lazy application.
         """
         raise NotImplementedError()
@@ -90,11 +104,6 @@ class SceneCache:
     ) -> Tuple[np.ndarray, np.ndarray]:
         raise NotImplementedError()
 
-    def get_positions_at(
-        self, scene_ts: int, agents: List[AgentMetadata]
-    ) -> np.ndarray:
-        raise NotImplementedError()
-
     def get_agents_history(
         self,
         scene_ts: int,
@@ -117,17 +126,21 @@ class SceneCache:
         raise NotImplementedError()
 
     @staticmethod
-    def is_map_cached(cache_path: Path, env_name: str, map_name: str) -> bool:
+    def is_map_cached(
+        cache_path: Path, env_name: str, map_name: str, resolution: float
+    ) -> bool:
         raise NotImplementedError()
 
     @staticmethod
-    def cache_map(cache_path: Path, map_obj: Map, env_name: str) -> None:
+    def cache_map(
+        cache_path: Path, vec_map: VectorizedMap, map_obj: RasterizedMap, env_name: str
+    ) -> None:
         raise NotImplementedError()
 
     @staticmethod
     def cache_map_layers(
         cache_path: Path,
-        map_info: MapMetadata,
+        map_info: RasterizedMapMetadata,
         layer_fn: Callable[[str], np.ndarray],
         env_name: str,
     ) -> None:
@@ -138,10 +151,11 @@ class SceneCache:
         world_x: float,
         world_y: float,
         desired_patch_size: int,
-        resolution: int,
+        resolution: float,
         offset_xy: Tuple[float, float],
         agent_heading: float,
         return_rgb: bool,
         rot_pad_factor: float = 1.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        no_map_val: float = 0.0,
+    ) -> Tuple[np.ndarray, np.ndarray, bool]:
         raise NotImplementedError()

@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package trajdata;
+
+message VectorizedMap {
+  // The full set of map elements.
+  repeated MapElement elements = 1;
+
+  // The coordinates of the cuboid (in m)
+  // containing all elements in this map.
+  optional Point max_pt = 2;
+  optional Point min_pt = 3;
+}
+
+message MapElement {
+  // A unique ID to identify this element.
+  bytes id = 1;
+
+  // Type specific data.
+  oneof element_data {
+    RoadLane road_lane = 2;
+    RoadArea road_area = 3;
+    PedCrosswalk ped_crosswalk = 4;
+    PedWalkway ped_walkway = 5;
+  }
+}
+
+message Point {
+  optional double x = 1;
+  optional double y = 2;
+  optional double z = 3;
+}
+
+message Polyline {
+  // Position deltas in millimeters. The origin is an arbitrary location.
+  // From https://github.com/woven-planet/l5kit/blob/master/l5kit/l5kit/data/proto/road_network.proto#L446
+  // The delta for the first point is just its coordinates tuple, i.e. it is a "delta" from
+  // the origin. For subsequent points, this field stores the difference between the point's
+  // coordinates and the previous point's coordinates. This is for representation efficiency.
+  repeated sint32 dx_mm = 1;
+  repeated sint32 dy_mm = 2;
+  repeated sint32 dz_mm = 3;
+}
+
+message RoadLane {
+  // The polyline data for the lane. A polyline is a list of points with
+  // segments defined between consecutive points.
+  Polyline center = 1;
+
+  // The polyline data for the left boundary of this lane.
+  Polyline left_boundary = 2;
+
+  // The polyline data for the right boundary of this lane.
+  Polyline right_boundary = 3;
+
+  // A list of IDs for lanes that this lane may be entered from.
+  repeated bytes entry_lanes = 4;
+
+  // A list of IDs for lanes that this lane may exit to.
+  repeated bytes exit_lanes = 5;
+  
+  // A list of neighbors to the left of this lane. Neighbor lanes
+  // include only adjacent lanes going the same direction.
+  repeated bytes adjacent_lanes_left = 6;
+
+  // A list of neighbors to the right of this lane. Neighbor lanes
+  // include only adjacent lanes going the same direction.
+  repeated bytes adjacent_lanes_right = 7;
+}
+
+message RoadArea {
+  // The polygon defining the outline of general driveable area. This acts as a 
+  // catch-all when there's a road segment without lane information.
+  // For example, intersections in nuScenes are not "lanes".
+  Polyline exterior_polygon = 1;
+
+  // The area within these polygons is NOT included.
+  repeated Polyline interior_holes = 2;
+}
+
+message PedCrosswalk {
+  // The polygon defining the outline of the crosswalk. The polygon is assumed
+  // to be closed (i.e. a segment exists between the last point and the first
+  // point).
+  Polyline polygon = 1;
+}
+
+message PedWalkway {
+  // The polygon defining the outline of the pedestrian walkway (e.g., sidewalk).
+  // The polygon is assumed to be closed (i.e. a segment exists between the last
+  // point and the first point).
+  Polyline polygon = 1;
+}

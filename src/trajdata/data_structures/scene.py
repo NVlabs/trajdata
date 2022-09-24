@@ -108,14 +108,9 @@ class SceneTimeAgent:
 
     # @profile
     def get_agent_distances_to(self, agent_info: AgentMetadata) -> np.ndarray:
-        agent_pos = np.array(
-            [
-                [
-                    self.cache.get_value(agent_info.name, self.ts, "x"),
-                    self.cache.get_value(agent_info.name, self.ts, "y"),
-                ]
-            ]
-        )
+        agent_pos: np.ndarray = self.cache.get_state(agent_info.name, self.ts)[:2]
 
-        curr_poses: np.ndarray = self.cache.get_positions_at(self.ts, self.agents)
+        curr_poses: np.ndarray = self.cache.get_states(
+            [a.name for a in self.agents], self.ts
+        )[:, :2]
         return np.linalg.norm(curr_poses - agent_pos, axis=1)

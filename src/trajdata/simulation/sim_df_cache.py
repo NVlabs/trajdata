@@ -54,7 +54,7 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
         if scene_ts >= agent_info.last_timestep:
             # Returning an empty DataFrame with the correct
             # columns. 3 = Extent size.
-            return np.zeros((0, self.state_dim)), np.zeros((0, 3))
+            return np.zeros((0, self.obs_dim)), np.zeros((0, 3))
 
         return super().get_agent_future(agent_info, scene_ts, future_sec)
 
@@ -70,7 +70,7 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
 
         if np.all(np.greater(scene_ts, last_timesteps)):
             return (
-                [np.zeros((0, self.state_dim)) for agent in agents],
+                [np.zeros((0, self.obs_dim)) for agent in agents],
                 [np.zeros((0, 3)) for agent in agents],  # 3 = Extent size.
                 np.zeros_like(last_timesteps),
             )
@@ -81,17 +81,20 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
         self.scene_ts += 1
 
         sim_dict: Dict[str, List[Union[str, float, int]]] = defaultdict(list)
-        for agent, state in xyh_dict.items():
-            prev_state = self.get_state(agent, self.scene_ts - 1)
+        prev_states: np.ndarray = self.get_states(
+            list(xyh_dict.keys()), self.scene_ts - 1
+        )
+        for idx, (agent, new_xyh) in enumerate(xyh_dict.items()):
+            prev_state = prev_states[idx]
 
             sim_dict["agent_id"].append(agent)
             sim_dict["scene_ts"].append(self.scene_ts)
 
-            sim_dict["x"].append(state[0])
-            sim_dict["y"].append(state[1])
+            sim_dict["x"].append(new_xyh[0])
+            sim_dict["y"].append(new_xyh[1])
 
-            vx: float = (state[0] - prev_state[0]) / self.scene.dt
-            vy: float = (state[1] - prev_state[1]) / self.scene.dt
+            vx: float = (new_xyh[0] - prev_state[0]) / self.scene.dt
+            vy: float = (new_xyh[1] - prev_state[1]) / self.scene.dt
             sim_dict["vx"].append(vx)
             sim_dict["vy"].append(vy)
 
@@ -100,7 +103,7 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
             sim_dict["ax"].append(ax)
             sim_dict["ay"].append(ay)
 
-            sim_dict["heading"].append(state[2])
+            sim_dict["heading"].append(new_xyh[2])
 
             if self.extent_cols:
                 sim_dict["length"].append(
@@ -122,6 +125,54 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
             self.persistent_data_df.drop(index=self.scene_ts, level=1, inplace=True)
 
         self.persistent_data_df = pd.concat([self.persistent_data_df, sim_step_df])
+        self.persistent_data_df.sort_index(inplace=True)
+        self.reset()
+
+    def add_agents(self, agent_data: List[Tuple]):
+        """Add new agents to the simulation data.
+
+        Args:
+            agent_data (List[Tuple]): _description_
+        """
+        new_state_df = list()
+        for data_i in agent_data:
+            name, state, ts0, _, extent = data_i
+
+            T = state.shape[0]
+            if T == 0:
+                vel = np.zeros([1, 2])
+                acc = np.zeros([1, 2])
+            else:
+                vel = (state[1:, :2] - state[:-1, :2]) / self.scene.dt
+                vel = np.vstack((vel[0:1], vel))
+
+                acc = (vel[1:] - vel[:-1]) / self.scene.dt
+                acc = np.vstack((acc[0:1], acc))
+
+            data = dict(
+                agent_id=np.array([name] * T),
+                scene_ts=np.arange(ts0, ts0 + T),
+                x=state[:, 0],
+                y=state[:, 1],
+                vx=vel[:, 0],
+                vy=vel[:, 1],
+                ax=acc[:, 0],
+                ay=acc[:, 1],
+                heading=state[:, 2],
+            )
+
+            if self.extent_cols:
+                data["length"] = extent[0]
+                data["width"] = extent[1]
+                data["height"] = extent[2]
+
+            new_state_df_i = pd.DataFrame(data)
+            new_state_df.append(new_state_df_i)
+
+        new_state_df = pd.concat(new_state_df)
+        new_state_df.set_index(["agent_id", "scene_ts"], inplace=True)
+
+        self.persistent_data_df = pd.concat([self.persistent_data_df, new_state_df])
         self.persistent_data_df.sort_index(inplace=True)
         self.reset()
 
