@@ -1,7 +1,7 @@
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import pandas as pd
@@ -496,37 +496,89 @@ class NuscDataset(RawDataset):
         map_name: str,
         cache_path: Path,
         map_cache_class: Type[SceneCache],
-        resolution: float,
+        map_params: Dict[str, Any],
     ) -> None:
-        """
-        resolution is in pixels per meter.
-        """
+        resolution: float = map_params["px_per_m"]
+
         nusc_map: NuScenesMap = NuScenesMap(
             dataroot=self.metadata.data_dir, map_name=map_name
         )
 
-        vectorized_map: VectorizedMap = self.extract_vectorized(nusc_map)
+        if map_params.get("original_format", False):
+            warnings.warn(
+                "Using a dataset's original map format is deprecated, and will be removed in the next version of trajdata!",
+                FutureWarning,
+            )
 
-        pbar_kwargs = {"position": 2, "leave": False}
-        map_data, map_from_world = map_utils.rasterize_map(
-            vectorized_map, resolution, **pbar_kwargs
-        )
+            width_m, height_m = nusc_map.canvas_edge
+            height_px, width_px = round(height_m * resolution), round(
+                width_m * resolution
+            )
 
-        rasterized_map_info: RasterizedMapMetadata = RasterizedMapMetadata(
-            name=map_name,
-            shape=map_data.shape,
-            layers=["drivable_area", "lane_divider", "ped_area"],
-            layer_rgb_groups=([0], [1], [2]),
-            resolution=resolution,
-            map_from_world=map_from_world,
-        )
-        rasterized_map_obj: RasterizedMap = RasterizedMap(rasterized_map_info, map_data)
-        map_cache_class.cache_map(
-            cache_path, vectorized_map, rasterized_map_obj, self.name
-        )
+            def layer_fn(layer_name: str) -> np.ndarray:
+                # Getting rid of the channels dim by accessing index [0]
+                return nusc_map.get_map_mask(
+                    patch_box=None,
+                    patch_angle=0,
+                    layer_names=[layer_name],
+                    canvas_size=(height_px, width_px),
+                )[0].astype(np.bool)
+
+            map_from_world: np.ndarray = np.array(
+                [[resolution, 0.0, 0.0], [0.0, resolution, 0.0], [0.0, 0.0, 1.0]]
+            )
+
+            layer_names: List[str] = [
+                "lane",
+                "road_segment",
+                "drivable_area",
+                "road_divider",
+                "lane_divider",
+                "ped_crossing",
+                "walkway",
+            ]
+            map_info: RasterizedMapMetadata = RasterizedMapMetadata(
+                name=map_name,
+                shape=(len(layer_names), height_px, width_px),
+                layers=layer_names,
+                layer_rgb_groups=([0, 1, 2], [3, 4], [5, 6]),
+                resolution=resolution,
+                map_from_world=map_from_world,
+            )
+
+            map_cache_class.cache_map_layers(
+                cache_path, VectorizedMap(), map_info, layer_fn, self.name
+            )
+        else:
+            vectorized_map: VectorizedMap = self.extract_vectorized(nusc_map)
+
+            pbar_kwargs = {"position": 2, "leave": False}
+            map_data, map_from_world = map_utils.rasterize_map(
+                vectorized_map, resolution, **pbar_kwargs
+            )
+
+            rasterized_map_info: RasterizedMapMetadata = RasterizedMapMetadata(
+                name=map_name,
+                shape=map_data.shape,
+                layers=["drivable_area", "lane_divider", "ped_area"],
+                layer_rgb_groups=([0], [1], [2]),
+                resolution=resolution,
+                map_from_world=map_from_world,
+            )
+
+            rasterized_map_obj: RasterizedMap = RasterizedMap(
+                rasterized_map_info, map_data
+            )
+
+            map_cache_class.cache_map(
+                cache_path, vectorized_map, rasterized_map_obj, self.name
+            )
 
     def cache_maps(
-        self, cache_path: Path, map_cache_class: Type[SceneCache], resolution: float
+        self,
+        cache_path: Path,
+        map_cache_class: Type[SceneCache],
+        map_params: Dict[str, Any],
     ) -> None:
         """
         Stores rasterized maps to disk for later retrieval.
@@ -551,7 +603,7 @@ class NuscDataset(RawDataset):
         """
         for map_name in tqdm(
             locations,
-            desc=f"Caching {self.name} Maps at {resolution:.2f} px/m",
+            desc=f"Caching {self.name} Maps at {map_params['px_per_m']:.2f} px/m",
             position=0,
         ):
-            self.cache_map(map_name, cache_path, map_cache_class, resolution)
+            self.cache_map(map_name, cache_path, map_cache_class, map_params)

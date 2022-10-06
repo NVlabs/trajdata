@@ -1,3 +1,4 @@
+import warnings
 from collections import defaultdict
 from functools import partial
 from math import ceil
@@ -403,8 +404,12 @@ class LyftDataset(RawDataset):
         return vec_map
 
     def cache_maps(
-        self, cache_path: Path, map_cache_class: Type[SceneCache], resolution: float
+        self,
+        cache_path: Path,
+        map_cache_class: Type[SceneCache],
+        map_params: Dict[str, Any],
     ) -> None:
+        resolution: float = map_params["px_per_m"]
         map_name: str = "palo_alto"
         print(f"Caching {map_name} Map at {resolution:.2f} px/m...", flush=True)
 
@@ -416,8 +421,65 @@ class LyftDataset(RawDataset):
         world_to_ecef = np.array(dataset_meta["world_to_ecef"], dtype=np.float64)
         mapAPI = MapAPI(semantic_map_filepath, world_to_ecef)
 
-        vectorized_map: VectorizedMap = self.extract_vectorized(mapAPI)
-        map_data, map_from_world = map_utils.rasterize_map(vectorized_map, resolution)
+        if map_params.get("original_format", False):
+            warnings.warn(
+                "Using a dataset's original map format is deprecated, and will be removed in the next version of trajdata!",
+                FutureWarning,
+            )
+
+            mins = np.stack(
+                [
+                    map_elem["bounds"][:, 0].min(axis=0)
+                    for map_elem in mapAPI.bounds_info.values()
+                ]
+            ).min(axis=0)
+            maxs = np.stack(
+                [
+                    map_elem["bounds"][:, 1].max(axis=0)
+                    for map_elem in mapAPI.bounds_info.values()
+                ]
+            ).max(axis=0)
+
+            world_right, world_top = maxs
+            world_left, world_bottom = mins
+
+            world_center: np.ndarray = np.array(
+                [(world_left + world_right) / 2, (world_bottom + world_top) / 2]
+            )
+            raster_size_px: np.ndarray = np.array(
+                [
+                    ceil((world_right - world_left) * resolution),
+                    ceil((world_top - world_bottom) * resolution),
+                ]
+            )
+
+            render_context = RenderContext(
+                raster_size_px=raster_size_px,
+                pixel_size_m=np.array([1 / resolution, 1 / resolution]),
+                center_in_raster_ratio=np.array([0.5, 0.5]),
+                set_origin_to_bottom=False,
+            )
+
+            map_from_world: np.ndarray = render_context.raster_from_world(
+                world_center, 0.0
+            )
+
+            rasterizer = MapSemanticRasterizer(
+                render_context, semantic_map_filepath, world_to_ecef
+            )
+
+            print("Rendering palo_alto Map...", flush=True, end=" ")
+            map_data: np.ndarray = rasterizer.render_semantic_map(
+                world_center, map_from_world
+            )
+            print("done!", flush=True)
+
+            vectorized_map = VectorizedMap()
+        else:
+            vectorized_map: VectorizedMap = self.extract_vectorized(mapAPI)
+            map_data, map_from_world = map_utils.rasterize_map(
+                vectorized_map, resolution
+            )
 
         rasterized_map_info: RasterizedMapMetadata = RasterizedMapMetadata(
             name=map_name,

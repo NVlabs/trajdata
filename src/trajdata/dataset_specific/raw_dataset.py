@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Set, Tuple, Type, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type, Union
 
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import (
@@ -84,7 +84,10 @@ class RawDataset:
         raise NotImplementedError()
 
     def cache_maps(
-        self, cache_path: Path, map_cache_class: Type[SceneCache], resolution: float
+        self,
+        cache_path: Path,
+        map_cache_class: Type[SceneCache],
+        map_params: Dict[str, Any],
     ) -> None:
         """
         resolution is in pixels per meter.

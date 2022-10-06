@@ -140,6 +140,7 @@ class SceneCache:
     @staticmethod
     def cache_map_layers(
         cache_path: Path,
+        vec_map: VectorizedMap,
         map_info: RasterizedMapMetadata,
         layer_fn: Callable[[str], np.ndarray],
         env_name: str,

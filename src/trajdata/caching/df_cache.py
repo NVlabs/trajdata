@@ -637,13 +637,14 @@ class DataFrameCache(SceneCache):
     @staticmethod
     def cache_map_layers(
         cache_path: Path,
+        vec_map: VectorizedMap,
         map_info: RasterizedMapMetadata,
         layer_fn: Callable[[str], np.ndarray],
         env_name: str,
     ) -> None:
         (
             maps_path,
-            _,
+            vector_map_path,
             raster_map_path,
             raster_metadata_path,
         ) = DataFrameCache.get_map_paths(
@@ -653,10 +654,16 @@ class DataFrameCache(SceneCache):
         # Ensuring the maps directory exists.
         maps_path.mkdir(parents=True, exist_ok=True)
 
+        # Saving the vectorized map data.
+        with open(vector_map_path, "wb") as f:
+            f.write(vec_map.SerializeToString())
+
+        # Saving the rasterized map data.
         disk_data = zarr.open_array(raster_map_path, mode="w", shape=map_info.shape)
         for idx, layer_name in enumerate(map_info.layers):
             disk_data[idx] = layer_fn(layer_name)
 
+        # Saving the rasterized map metadata.
         with open(raster_metadata_path, "wb") as f:
             dill.dump(map_info, f)
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Final, List, Optional, Tuple, Type
+from typing import Any, Dict, Final, List, Optional, Tuple, Type
 
 import numpy as np
 import pandas as pd
@@ -325,7 +325,10 @@ class EUPedsDataset(RawDataset):
         pass
 
     def cache_maps(
-        self, cache_path: Path, map_cache_class: Type[SceneCache], resolution: float
+        self,
+        cache_path: Path,
+        map_cache_class: Type[SceneCache],
+        map_params: Dict[str, Any],
     ) -> None:
         """
         No maps in this dataset!

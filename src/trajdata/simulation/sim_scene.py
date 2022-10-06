@@ -137,6 +137,7 @@ class SimulationScene:
                     map_params=self.dataset.map_params,
                     standardize_data=self.dataset.standardize_data,
                     standardize_derivatives=self.dataset.standardize_derivatives,
+                    max_neighbor_num=self.dataset.max_neighbor_num,
                 )
             )
 

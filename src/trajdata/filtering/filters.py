@@ -8,13 +8,13 @@ def agent_types(
     agents: List[AgentMetadata], no_types: Set[AgentType], only_types: Set[AgentType]
 ) -> List[AgentMetadata]:
     agents_list: List[AgentMetadata] = agents
-    
+
     if no_types is not None:
         agents_list = [agent for agent in agents_list if agent.type not in no_types]
-    
+
     if only_types is not None:
         agents_list = [agent for agent in agents_list if agent.type in only_types]
-    
+
     return agents_list
 
 
