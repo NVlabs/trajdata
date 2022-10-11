@@ -9,14 +9,14 @@ class MapMetadata:
     def __init__(
         self,
         name: str,
-        shape: Tuple[int, int],
+        shape: Tuple[int, int, int],
         layers: List[str],
         layer_rgb_groups: Tuple[List[int], List[int], List[int]],
         resolution: float,  # px/m
         map_from_world: np.ndarray,  # Transformation from world coordinates [m] to map coordinates [px]
     ) -> None:
         self.name: str = name
-        self.shape: Tuple[int, int] = shape
+        self.shape: Tuple[int, int, int] = shape
         self.layers: List[str] = layers
         self.layer_rgb_groups: Tuple[List[int], List[int], List[int]] = layer_rgb_groups
         self.resolution: float = resolution
