@@ -21,3 +21,8 @@ class LyftSceneRecord(NamedTuple):
     name: str
     length: str
     data_idx: int
+
+class WaymoSceneRecord(NamedTuple):
+    name: str
+    length: str
+    data_idx: int

@@ -51,3 +51,8 @@ print("Validation Data: ")
 load_tfrecords(data_dir + '/validation', True)
 print("Validation_interactive Data: ")
 load_tfrecords(data_dir + '/validation_interactive', True)
+
+class WaymoScenarios:
+    def WaymoScenarios(self, source_dir):
+        self.name = source_dir
+        self.scenarios = load_tfrecords(source_dir)
