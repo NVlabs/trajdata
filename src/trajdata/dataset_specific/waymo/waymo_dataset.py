@@ -1,9 +1,17 @@
 from collections import defaultdict
 from functools import partial
+from pathlib import Path
 
+from trajdata.data_structures.agent import (
+    Agent,
+    AgentMetadata,
+    AgentType,
+    FixedExtent,
+    VariableExtent
+)
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.dataset_specific.raw_dataset import RawDataset
-from waymo_utils import WaymoScenarios
+from waymo_utils import WaymoScenarios, translate_agent_type
 import waymo_utils
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 from ..scene_records import WaymoSceneRecord
@@ -16,8 +24,11 @@ from trajdata.data_structures import (
     SceneTag,
 )
 from waymo_open_dataset.protos.scenario_pb2 import Scenario
+
+
 def const_lambda(const_val: Any) -> Any:
     return const_val
+
 
 class WaymoDataset(RawDataset):
     def compute_metadata(self, env_name: str, data_dir: str) -> EnvMetadata:
@@ -58,7 +69,6 @@ class WaymoDataset(RawDataset):
             print(f"Loading {self.name} dataset...", flush=True)
 
         self.dataset_obj = WaymoScenarios(self.metadata.data_dir)
-
 
     def _get_matching_scenes_from_obj(
             self,
@@ -140,3 +150,67 @@ class WaymoDataset(RawDataset):
                 scenes_list.append(scene_metadata)
 
         return scenes_list
+
+    def get_agent_info(
+        self, scene: Scene, cache_path: Path, cache_class: Type[SceneCache]
+    ) -> Tuple[List[AgentMetadata], List[List[AgentMetadata]]]:
+        ego_agent_info: AgentMetadata = AgentMetadata(
+            name="ego",
+            agent_type=AgentType.VEHICLE,
+            first_timestep=0,
+            last_timestep=scene.length_timesteps - 1,
+            extent=FixedExtent(length=5.285999774932861, width=2.3320000171661377, height=2.3299999237060547),
+        )
+        agent_list: List[AgentMetadata] = []
+        agent_presence: List[List[AgentMetadata]] = [
+            [] for _ in range(scene.length_timesteps)
+        ]
+        scenario = self.dataset_obj.scenarios[scene.raw_data_idx]
+        for index, track in enumerate(scenario.tracks):
+            if index == scenario.sdc_track_index:
+                continue
+            agent_name = track.id
+            agent_type: AgentType = translate_agent_type(track.object_type)
+            first_timestep = 0
+            states = track.states
+            for timestep in range(scene.length_timesteps):
+                if states[timestep].valid:
+                    first_timestep = timestep
+                    break
+            last_timestep = scene.length_timesteps -1
+            for timestep in range(scene.length_timesteps):
+                if states[scene.length_timesteps-timestep-1].valid:
+                    last_timestep = timestep
+                    break
+
+            agent_info = AgentMetadata(
+                name=agent_name,
+                agent_type=agent_type,
+                first_timestep=first_timestep,
+                last_timestep=last_timestep,
+                extent=VariableExtent(),
+            )
+            if last_timestep-first_timestep != 0:
+                agent_list.append(agent_info)
+            for timestep in range(first_timestep, last_timestep+1):
+                agent_presence[timestep].append(agent_info)
+
+
+        return agent_list, agent_presence
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
