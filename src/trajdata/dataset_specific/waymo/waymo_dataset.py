@@ -170,6 +170,7 @@ class WaymoDataset(RawDataset):
         agent_ml_class = []
         agent_sizes = []
 
+        agents_to_remove = []
         for index, track in enumerate(scenario.tracks):
             agent_name = track.id
             if index == scenario.sdc_track_index:
@@ -209,8 +210,10 @@ class WaymoDataset(RawDataset):
             )
             if last_timestep - first_timestep != 0:
                 agent_list.append(agent_info)
-            for timestep in range(first_timestep, last_timestep + 1):
-                agent_presence[timestep].append(agent_info)
+                for timestep in range(first_timestep, last_timestep + 1):
+                    agent_presence[timestep].append(agent_info)
+            else:
+                agents_to_remove.append(agent_name)
 
         agent_ids = np.repeat(agent_ids, scene.length_timesteps)
 
@@ -263,6 +266,10 @@ class WaymoDataset(RawDataset):
                          "ay",
                          "heading",
                      ] + extent_cols
+        # Removing agents with only one detection.
+        all_agent_data_df.drop(index=agents_to_remove, inplace=True)
+
+        # Changing the agent_id dtype to str
         all_agent_data_df.reset_index(inplace=True)
         all_agent_data_df["agent_id"] = all_agent_data_df["agent_id"].astype(str)
         all_agent_data_df.set_index(["agent_id", "scene_ts"], inplace=True)
