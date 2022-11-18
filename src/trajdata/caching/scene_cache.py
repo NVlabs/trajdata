@@ -1,13 +1,19 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from trajdata.maps import TrafficLightStatus, VectorMap
+
+
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from trajdata.augmentation.augmentation import Augmentation
 from trajdata.data_structures.agent import AgentMetadata
 from trajdata.data_structures.scene_metadata import Scene
-from trajdata.maps import RasterizedMap, RasterizedMapMetadata
-from trajdata.proto.vectorized_map_pb2 import VectorizedMap
 
 
 class SceneCache:
@@ -15,7 +21,6 @@ class SceneCache:
         self,
         cache_path: Path,
         scene: Scene,
-        scene_ts: Optional[int] = 0,
         augmentations: Optional[List[Augmentation]] = None,
     ) -> None:
         """
@@ -24,12 +29,18 @@ class SceneCache:
         self.path = cache_path
         self.scene = scene
         self.dt = scene.dt
-        self.scene_ts = scene_ts
         self.augmentations = augmentations
 
         # Ensuring the scene cache folder exists
-        self.scene_dir: Path = self.path / self.scene.env_name / self.scene.name
+        self.scene_dir: Path = SceneCache.scene_cache_dir(
+            self.path, self.scene.env_name, self.scene.name
+        )
         self.scene_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def scene_cache_dir(cache_path: Path, env_name: str, scene_name: str) -> Path:
+        """Standardized convention to compute scene cache folder path"""
+        return cache_path / env_name / scene_name
 
     def write_cache_to_disk(self) -> None:
         """Saves agent data to disk for fast loading later (just like save_agent_data),
@@ -50,6 +61,12 @@ class SceneCache:
     def get_value(self, agent_id: str, scene_ts: int, attribute: str) -> float:
         """
         Get a single attribute value for an agent at a timestep.
+        """
+        raise NotImplementedError()
+
+    def get_raw_state(self, agent_id: str, scene_ts: int) -> np.ndarray:
+        """
+        Get an agent's raw state (without transformations applied)
         """
         raise NotImplementedError()
 
@@ -120,6 +137,24 @@ class SceneCache:
     ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
         raise NotImplementedError()
 
+    # TRAFFIC LIGHT INFO
+    @staticmethod
+    def save_traffic_light_data(
+        traffic_light_status_data: Any, cache_path: Path, scene: Scene
+    ) -> None:
+        """Saves traffic light status to disk for easy access later"""
+        raise NotImplementedError()
+
+    def is_traffic_light_data_cached(self, desired_dt: Optional[float] = None) -> bool:
+        raise NotImplementedError()
+
+    def get_traffic_light_status_dict(
+        self,
+    ) -> Dict[Tuple[int, int], TrafficLightStatus]:
+        """Returns lookup table for traffic light status in the current scene
+        lane_id, scene_ts -> TrafficLightStatus"""
+        raise NotImplementedError()
+
     # MAPS
     @staticmethod
     def are_maps_cached(cache_path: Path, env_name: str) -> bool:
@@ -132,18 +167,10 @@ class SceneCache:
         raise NotImplementedError()
 
     @staticmethod
-    def cache_map(
-        cache_path: Path, vec_map: VectorizedMap, map_obj: RasterizedMap, env_name: str
-    ) -> None:
-        raise NotImplementedError()
-
-    @staticmethod
-    def cache_map_layers(
+    def finalize_and_cache_map(
         cache_path: Path,
-        vec_map: VectorizedMap,
-        map_info: RasterizedMapMetadata,
-        layer_fn: Callable[[str], np.ndarray],
-        env_name: str,
+        vector_map: VectorMap,
+        map_params: Dict[str, Any],
     ) -> None:
         raise NotImplementedError()
 

@@ -1,7 +1,7 @@
 from typing import Dict, List
 
-from trajdata.dataset_specific import RawDataset
 from trajdata.dataset_specific.eth_ucy_peds import EUPedsDataset
+from trajdata.dataset_specific.raw_dataset import RawDataset
 
 try:
     from trajdata.dataset_specific.lyft import LyftDataset
@@ -18,6 +18,14 @@ except ModuleNotFoundError:
     pass
 
 
+try:
+    from trajdata.dataset_specific.nuplan import NuplanDataset
+except ModuleNotFoundError:
+    # This can happen if the user did not install trajdata
+    # with the "trajdata[nuplan]" option.
+    pass
+
+
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nusc" in dataset_name:
         return NuscDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
@@ -29,6 +37,9 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
         return EUPedsDataset(
             dataset_name, data_dir, parallelizable=True, has_maps=False
         )
+
+    if "nuplan" in dataset_name:
+        return NuplanDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 

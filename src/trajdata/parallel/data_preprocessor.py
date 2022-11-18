@@ -6,8 +6,7 @@ from torch.utils.data import Dataset
 
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import Scene, SceneMetadata
-from trajdata.utils import agent_utils
-from trajdata.utils.env_utils import get_raw_dataset
+from trajdata.utils import agent_utils, env_utils
 
 
 def scene_paths_collate_fn(filled_scenes: List) -> List:
@@ -61,7 +60,7 @@ class ParallelDatasetPreprocessor(Dataset):
         scene_idx: int = self.scene_name_idxs[idx]
 
         env_name: str = str(self.env_names_arr[env_idx], encoding="utf-8")
-        raw_dataset = get_raw_dataset(
+        raw_dataset = env_utils.get_raw_dataset(
             env_name, str(self.data_dir_arr[env_idx], encoding="utf-8")
         )
 
@@ -83,6 +82,13 @@ class ParallelDatasetPreprocessor(Dataset):
             self.desired_dt,
         )
         raw_dataset.del_dataset_obj()
+
+        if scene is None:
+            # This provides an escape hatch in case there's a reason we
+            # don't want to add a scene to the list of scenes. As an example,
+            # nuPlan has a scene with only a single frame of data which we
+            # can't do much with in terms of prediction/planning/etc.
+            return None
 
         scene_path: Path = EnvCache.scene_metadata_path(
             env_cache.path, scene.env_name, scene.name, scene.dt

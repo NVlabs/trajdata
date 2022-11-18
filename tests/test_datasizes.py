@@ -141,8 +141,8 @@ class TestDatasetSizes(unittest.TestCase):
             future_sec=(4.8, 4.8),
             only_types=[AgentType.VEHICLE],
             incl_robot_future=False,
-            incl_map=False,
-            map_params={
+            incl_raster_map=False,
+            raster_map_params={
                 "px_per_m": 2,
                 "map_size_px": 224,
                 "offset_frac_xy": (-0.5, 0.0),

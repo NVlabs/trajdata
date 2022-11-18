@@ -81,6 +81,13 @@ class RawDataset:
     def get_agent_info(
         self, scene: Scene, cache_path: Path, cache_class: Type[SceneCache]
     ) -> Tuple[List[AgentMetadata], List[List[AgentMetadata]]]:
+        """
+        Get frame-level information from source dataset, caching it
+        to cache_path.
+
+        Always called after cache_maps, can load map if needed
+        to associate map information to positions.
+        """
         raise NotImplementedError()
 
     def cache_maps(
@@ -90,6 +97,9 @@ class RawDataset:
         map_params: Dict[str, Any],
     ) -> None:
         """
-        resolution is in pixels per meter.
+        Get static, scene-level info from the source dataset, caching it
+        to cache_path. (Primarily this is info needed to construct VectorMap)
+
+        Resolution is in pixels per meter.
         """
         raise NotImplementedError()

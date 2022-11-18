@@ -7,7 +7,7 @@ import numpy as np
 from trajdata.caching import SceneCache
 from trajdata.data_structures.agent import AgentMetadata, AgentType
 from trajdata.data_structures.scene import SceneTime, SceneTimeAgent
-from trajdata.maps import RasterizedMapPatch
+from trajdata.maps import MapAPI, RasterizedMapPatch, VectorMap
 
 
 class AgentBatchElement:
@@ -25,8 +25,10 @@ class AgentBatchElement:
             Tuple[AgentType, AgentType], float
         ] = defaultdict(lambda: np.inf),
         incl_robot_future: bool = False,
-        incl_map: bool = False,
-        map_params: Optional[Dict[str, Any]] = None,
+        incl_raster_map: bool = False,
+        raster_map_params: Optional[Dict[str, Any]] = None,
+        map_api: Optional[MapAPI] = None,
+        vector_map_params: Optional[Dict[str, Any]] = None,
         standardize_data: bool = False,
         standardize_derivatives: bool = False,
         max_neighbor_num: Optional[int] = None,
@@ -43,7 +45,7 @@ class AgentBatchElement:
         self.agent_type: AgentType = agent_info.type
         self.max_neighbor_num = max_neighbor_num
 
-        self.curr_agent_state_np: np.ndarray = cache.get_state(
+        self.curr_agent_state_np: np.ndarray = cache.get_raw_state(
             agent_info.name, self.scene_ts
         )
 
@@ -62,7 +64,7 @@ class AgentBatchElement:
             )
             self.agent_from_world_tf: np.ndarray = np.linalg.inv(world_from_agent_tf)
 
-            offset = self.curr_agent_state_np
+            offset = self.curr_agent_state_np.copy()
             if not standardize_derivatives:
                 offset[2:6] = 0.0
 
@@ -129,9 +131,23 @@ class AgentBatchElement:
             self.robot_future_len: int = self.robot_future_np.shape[0] - 1
 
         ### MAP ###
+        self.map_name: Optional[str] = None
         self.map_patch: Optional[RasterizedMapPatch] = None
-        if incl_map:
-            self.map_patch = self.get_agent_map_patch(map_params)
+
+        map_name: str = (
+            f"{scene_time_agent.scene.env_name}:{scene_time_agent.scene.location}"
+        )
+        if incl_raster_map:
+            self.map_name = map_name
+            self.map_patch = self.get_agent_map_patch(raster_map_params)
+
+        self.vec_map: Optional[VectorMap] = None
+        if map_api is not None:
+            self.vec_map = map_api.get_map(
+                map_name,
+                self.cache if self.cache.is_traffic_light_data_cached() else None,
+                **vector_map_params if vector_map_params is not None else None,
+            )
 
         self.scene_id = scene_time_agent.scene.name
 
@@ -315,8 +331,10 @@ class SceneBatchElement:
             Tuple[AgentType, AgentType], float
         ] = defaultdict(lambda: np.inf),
         incl_robot_future: bool = False,
-        incl_map: bool = False,
-        map_params: Optional[Dict[str, Any]] = None,
+        incl_raster_map: bool = False,
+        raster_map_params: Optional[Dict[str, Any]] = None,
+        map_api: Optional[MapAPI] = None,
+        vector_map_params: Optional[Dict[str, Any]] = None,
         standardize_data: bool = False,
         standardize_derivatives: bool = False,
         max_agent_num: Optional[int] = None,
@@ -385,6 +403,7 @@ class SceneBatchElement:
         )
 
         self.num_agents = len(nearby_agents)
+        self.agent_names = [agent.name for agent in nearby_agents]
         (
             self.agent_histories,
             self.agent_history_extents,
@@ -397,12 +416,26 @@ class SceneBatchElement:
         ) = self.get_agents_future(future_sec, nearby_agents)
 
         ### MAP ###
+        self.map_name: Optional[str] = None
         self.map_patches: Optional[RasterizedMapPatch] = None
-        if incl_map:
+
+        map_name: str = f"{scene_time.scene.env_name}:{scene_time.scene.location}"
+        if incl_raster_map:
+            self.map_name = map_name
             self.map_patches = self.get_agents_map_patch(
-                map_params, self.agent_histories
+                raster_map_params, self.agent_histories
             )
+
+        self.vec_map: Optional[VectorMap] = None
+        if map_api is not None:
+            self.vec_map = map_api.get_map(
+                map_name,
+                self.cache if self.cache.is_traffic_light_data_cached() else None,
+                **vector_map_params if vector_map_params is not None else None,
+            )
+
         self.scene_id = scene_time.scene.name
+
         ### ROBOT DATA ###
         self.robot_future_np: Optional[np.ndarray] = None
 

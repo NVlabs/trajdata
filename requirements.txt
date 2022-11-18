@@ -3,6 +3,7 @@ tqdm
 matplotlib
 dill
 pandas
+seaborn
 pyarrow
 torch
 zarr

@@ -3,13 +3,20 @@ syntax = "proto3";
 package trajdata;
 
 message VectorizedMap {
+  // The name of this map in the format environment_name:map_name
+  string name = 1;
+
   // The full set of map elements.
-  repeated MapElement elements = 1;
+  repeated MapElement elements = 2;
 
   // The coordinates of the cuboid (in m)
   // containing all elements in this map.
-  optional Point max_pt = 2;
-  optional Point min_pt = 3;
+  Point max_pt = 3;
+  Point min_pt = 4;
+  
+  // The original world coordinates (in m) of the bottom-left of the map
+  // (account for a change in the origin for storage efficiency).
+  Point shifted_origin = 5;
 }
 
 message MapElement {
@@ -26,9 +33,9 @@ message MapElement {
 }
 
 message Point {
-  optional double x = 1;
-  optional double y = 2;
-  optional double z = 3;
+  double x = 1;
+  double y = 2;
+  double z = 3;
 }
 
 message Polyline {
@@ -40,6 +47,7 @@ message Polyline {
   repeated sint32 dx_mm = 1;
   repeated sint32 dy_mm = 2;
   repeated sint32 dz_mm = 3;
+  repeated double h_rad = 4;
 }
 
 message RoadLane {
@@ -47,11 +55,11 @@ message RoadLane {
   // segments defined between consecutive points.
   Polyline center = 1;
 
-  // The polyline data for the left boundary of this lane.
-  Polyline left_boundary = 2;
+  // The polyline data for the (optional) left boundary of this lane.
+  optional Polyline left_boundary = 2;
 
-  // The polyline data for the right boundary of this lane.
-  Polyline right_boundary = 3;
+  // The polyline data for the (optional) right boundary of this lane.
+  optional Polyline right_boundary = 3;
 
   // A list of IDs for lanes that this lane may be entered from.
   repeated bytes entry_lanes = 4;
