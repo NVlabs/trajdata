@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 
 from torch.utils.data import DataLoader
@@ -5,7 +6,6 @@ from tqdm import tqdm
 
 from trajdata import AgentBatch, AgentType, UnifiedDataset
 from trajdata.augmentation import NoiseHistories
-from trajdata.visualization.vis import plot_agent_batch
 
 
 def main():
@@ -19,13 +19,14 @@ def main():
         future_sec=(4.8, 4.8),
         only_predict=[AgentType.VEHICLE],
         agent_interaction_distances=defaultdict(lambda: 30.0),
-        incl_robot_future=False,
+        incl_robot_future=True,
         incl_raster_map=True,
         raster_map_params={
             "px_per_m": 2,
             "map_size_px": 224,
             "offset_frac_xy": (-0.5, 0.0),
         },
+        incl_vector_map=True,
         augmentations=[noise_hists],
         num_workers=0,
         verbose=True,
@@ -38,15 +39,15 @@ def main():
 
     dataloader = DataLoader(
         dataset,
-        batch_size=4,
+        batch_size=64,
         shuffle=True,
         collate_fn=dataset.get_collate_fn(),
-        num_workers=4,
+        num_workers=os.cpu_count() // 2,
     )
 
     batch: AgentBatch
     for batch in tqdm(dataloader):
-        plot_agent_batch(batch, batch_idx=0)
+        pass
 
 
 if __name__ == "__main__":

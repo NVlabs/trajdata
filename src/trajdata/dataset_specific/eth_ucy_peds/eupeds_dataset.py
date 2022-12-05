@@ -278,8 +278,6 @@ class EUPedsDataset(RawDataset):
             last_frame: int = frames.iat[-1].item()
 
             if frames.shape[0] < last_frame - start_frame + 1:
-                # Fun fact: this is never hit which means Lyft has no missing
-                # timesteps (which could be caused by, e.g., occlusion).
                 raise ValueError("ETH/UCY indeed can have missing frames :(")
 
             agent_metadata = AgentMetadata(

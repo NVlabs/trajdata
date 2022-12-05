@@ -1,5 +1,4 @@
 from dataclasses import asdict
-from enum import IntEnum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -12,26 +11,45 @@ from torch.nn.utils.rnn import pad_sequence
 from trajdata.augmentation import BatchAugmentation
 from trajdata.data_structures.batch import AgentBatch, SceneBatch
 from trajdata.data_structures.batch_element import AgentBatchElement, SceneBatchElement
+from trajdata.maps import VectorMap
 from trajdata.utils import arr_utils
 
 
-def map_collate_fn_agent(
+class CustomCollateData:
+    @staticmethod
+    def __collate__(elements: list) -> any:
+        raise NotImplementedError
+
+    def __to__(self, device, non_blocking=False):
+        raise NotImplementedError
+
+
+def _collate_data(elems):
+    if hasattr(elems[0], "__collate__"):
+        return elems[0].__collate__(elems)
+    else:
+        return torch.as_tensor(np.stack(elems))
+
+
+def raster_map_collate_fn_agent(
     batch_elems: List[AgentBatchElement],
 ):
     if batch_elems[0].map_patch is None:
-        return None, None, None
+        return None, None, None, None
+
+    map_names = [batch_elem.map_name for batch_elem in batch_elems]
 
     # Ensuring that any empty map patches have the correct number of channels
     # prior to collation.
     has_data: np.ndarray = np.array(
         [batch_elem.map_patch.has_data for batch_elem in batch_elems],
-        dtype=np.bool,
+        dtype=bool,
     )
     no_data: np.ndarray = ~has_data
 
     patch_channels: np.ndarray = np.array(
         [batch_elem.map_patch.data.shape[0] for batch_elem in batch_elems],
-        dtype=np.int,
+        dtype=int,
     )
 
     desired_num_channels: int
@@ -148,26 +166,28 @@ def map_collate_fn_agent(
         )
 
     return (
+        map_names,
         rot_crop_patches,
         resolution,
         rasters_from_world_tf,
     )
 
 
-def map_collate_fn_scene(
+def raster_map_collate_fn_scene(
     batch_elems: List[SceneBatchElement],
     max_agent_num: Optional[int] = None,
     pad_value: Any = np.nan,
 ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
 
     if batch_elems[0].map_patches is None:
-        return None, None, None
+        return None, None, None, None
 
     patch_size: int = batch_elems[0].map_patches[0].crop_size
     assert all(
         batch_elem.map_patches[0].crop_size == patch_size for batch_elem in batch_elems
     )
 
+    map_names: List[str] = list()
     num_agents: List[int] = list()
     agents_rasters_from_world_tfs: List[np.ndarray] = list()
     agents_patches: List[np.ndarray] = list()
@@ -175,6 +195,7 @@ def map_collate_fn_scene(
     agents_res_list: List[float] = list()
 
     for elem in batch_elems:
+        map_names.append(elem.map_name)
         num_agents.append(min(elem.num_agents, max_agent_num))
         agents_rasters_from_world_tfs += [
             x.raster_from_world_tf for x in elem.map_patches[:max_agent_num]
@@ -253,7 +274,7 @@ def map_collate_fn_scene(
         agents_resolution, num_agents, pad_value=0, desired_size=max_agent_num
     )
 
-    return rot_crop_patches, agents_resolution, agents_rasters_from_world_tf
+    return map_names, rot_crop_patches, agents_resolution, agents_rasters_from_world_tf
 
 
 def agent_collate_fn(
@@ -270,6 +291,7 @@ def agent_collate_fn(
     )
 
     data_index_t: Tensor = torch.zeros((batch_size,), dtype=torch.int)
+    scene_ts_t: Tensor = torch.zeros((batch_size,), dtype=torch.int)
     dt_t: Tensor = torch.zeros((batch_size,), dtype=torch.float)
     agent_type_t: Tensor = torch.zeros((batch_size,), dtype=torch.int)
     agent_names: List[str] = list()
@@ -329,6 +351,7 @@ def agent_collate_fn(
     elem: AgentBatchElement
     for idx, elem in enumerate(batch_elems):
         data_index_t[idx] = elem.data_index
+        scene_ts_t[idx] = elem.scene_ts
         dt_t[idx] = elem.dt
         agent_names.append(elem.agent_name)
         agent_type_t[idx] = elem.agent_type.value
@@ -615,10 +638,15 @@ def agent_collate_fn(
     )
 
     (
+        map_names,
         map_patches,
         maps_resolution,
         rasters_from_world_tf,
-    ) = map_collate_fn_agent(batch_elems)
+    ) = raster_map_collate_fn_agent(batch_elems)
+
+    vector_maps: Optional[List[VectorMap]] = None
+    if batch_elems[0].vec_map is not None:
+        vector_maps = [batch_elem.vec_map for batch_elem in batch_elems]
 
     agents_from_world_tf = torch.as_tensor(
         np.stack([batch_elem.agent_from_world_tf for batch_elem in batch_elems]),
@@ -629,12 +657,13 @@ def agent_collate_fn(
 
     extras: Dict[str, Tensor] = {}
     for key in batch_elems[0].extras.keys():
-        extras[key] = torch.as_tensor(
-            np.stack([batch_elem.extras[key] for batch_elem in batch_elems])
+        extras[key] = _collate_data(
+            [batch_elem.extras[key] for batch_elem in batch_elems]
         )
 
     batch = AgentBatch(
         data_idx=data_index_t,
+        scene_ts=scene_ts_t,
         dt=dt_t,
         agent_name=agent_names,
         agent_type=agent_type_t,
@@ -655,8 +684,10 @@ def agent_collate_fn(
         neigh_fut_len=neighbor_future_lens_t,
         robot_fut=robot_future_t,
         robot_fut_len=robot_future_len,
+        map_names=map_names,
         maps=map_patches,
         maps_resolution=maps_resolution,
+        vector_maps=vector_maps,
         rasters_from_world_tf=rasters_from_world_tf,
         agents_from_world_tf=agents_from_world_tf,
         scene_ids=scene_ids,
@@ -733,6 +764,7 @@ def scene_collate_fn(
     )
 
     data_index_t: Tensor = torch.zeros((batch_size,), dtype=torch.int)
+    scene_ts_t: Tensor = torch.zeros((batch_size,), dtype=torch.int)
     dt_t: Tensor = torch.zeros((batch_size,), dtype=torch.float)
 
     max_agent_num: int = max(elem.num_agents for elem in batch_elems)
@@ -762,6 +794,7 @@ def scene_collate_fn(
 
     for idx, elem in enumerate(batch_elems):
         data_index_t[idx] = elem.data_index
+        scene_ts_t[idx] = elem.scene_ts
         dt_t[idx] = elem.dt
         centered_agent_state.append(elem.centered_agent_state_np)
         agents_types.append(elem.agent_types_np)
@@ -871,9 +904,17 @@ def scene_collate_fn(
         agents_types_t, num_agents, pad_value=-1, desired_size=max_agent_num
     )
 
-    map_patches, maps_resolution, rasters_from_world_tf = map_collate_fn_scene(
-        batch_elems, max_agent_num
-    )
+    (
+        map_names,
+        map_patches,
+        maps_resolution,
+        rasters_from_world_tf,
+    ) = raster_map_collate_fn_scene(batch_elems, max_agent_num)
+
+    vector_maps: Optional[List[VectorMap]] = None
+    if batch_elems[0].vec_map is not None:
+        vector_maps = [batch_elem.vec_map for batch_elem in batch_elems]
+
     centered_agent_from_world_tf = torch.as_tensor(
         np.stack(
             [batch_elem.centered_agent_from_world_tf for batch_elem in batch_elems]
@@ -893,6 +934,8 @@ def scene_collate_fn(
         else None
     )
 
+    agent_names = [batch_elem.agent_names for batch_elem in batch_elems]
+
     scene_ids = [batch_elem.scene_id for batch_elem in batch_elems]
 
     extras: Dict[str, Tensor] = {}
@@ -903,10 +946,12 @@ def scene_collate_fn(
 
     batch = SceneBatch(
         data_idx=data_index_t,
+        scene_ts=scene_ts_t,
         dt=dt_t,
         num_agents=num_agents_t,
         agent_type=agents_types_t,
         centered_agent_state=centered_agent_state_t,
+        agent_names=agent_names,
         agent_hist=agents_histories_t,
         agent_hist_extent=agents_history_extents_t,
         agent_hist_len=agents_history_len,
@@ -915,8 +960,10 @@ def scene_collate_fn(
         agent_fut_len=agents_future_len,
         robot_fut=robot_future_t,
         robot_fut_len=robot_future_len,
+        map_names=map_names,
         maps=map_patches,
         maps_resolution=maps_resolution,
+        vector_maps=vector_maps,
         rasters_from_world_tf=rasters_from_world_tf,
         centered_agent_from_world_tf=centered_agent_from_world_tf,
         centered_world_from_agent_tf=centered_world_from_agent_tf,

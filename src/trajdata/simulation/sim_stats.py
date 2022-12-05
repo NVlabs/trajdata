@@ -83,12 +83,22 @@ def calc_stats(
     """
 
     velocity: Tensor = (
-        torch.diff(positions, dim=1, prepend=positions[:, [1]] - positions[:, [0]]) / dt
+        torch.diff(
+            positions,
+            dim=1,
+            prepend=positions[:, [0]] - (positions[:, [1]] - positions[:, [0]]),
+        )
+        / dt
     )
     velocity_norm: Tensor = torch.linalg.vector_norm(velocity, dim=-1)
 
     accel: Tensor = (
-        torch.diff(positions, dim=1, prepend=velocity[:, [1]] - velocity[:, [0]]) / dt
+        torch.diff(
+            velocity,
+            dim=1,
+            prepend=velocity[:, [0]] - (velocity[:, [1]] - velocity[:, [0]]),
+        )
+        / dt
     )
     accel_norm: Tensor = torch.linalg.vector_norm(accel, dim=-1)
 
@@ -96,7 +106,11 @@ def calc_stats(
     lat_acc: Tensor = accel_norm * torch.sin(heading.squeeze(-1))
 
     jerk: Tensor = (
-        torch.diff(accel_norm, dim=1, prepend=accel_norm[:, [1]] - accel_norm[:, [0]])
+        torch.diff(
+            accel_norm,
+            dim=1,
+            prepend=accel_norm[:, [0]] - (accel_norm[:, [1]] - accel_norm[:, [0]]),
+        )
         / dt
     )
 

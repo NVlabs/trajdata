@@ -11,9 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from trajdata import AgentBatch, AgentType, UnifiedDataset
-from trajdata.augmentation import NoiseHistories
 from trajdata.data_structures.batch_element import AgentBatchElement, SceneBatchElement
-from trajdata.visualization.vis import plot_agent_batch
 
 
 def custom_random_data(
@@ -74,8 +72,12 @@ def main():
         only_types=[AgentType.VEHICLE],
         agent_interaction_distances=defaultdict(lambda: 30.0),
         incl_robot_future=False,
-        incl_map=True,
-        map_params={"px_per_m": 2, "map_size_px": 224, "offset_frac_xy": (-0.5, 0.0)},
+        incl_raster_map=True,
+        raster_map_params={
+            "px_per_m": 2,
+            "map_size_px": 224,
+            "offset_frac_xy": (-0.5, 0.0),
+        },
         num_workers=0,
         verbose=True,
         data_dirs={  # Remember to change this to match your filesystem!

@@ -86,6 +86,7 @@ Currently, the dataloader supports interfacing with the following datasets:
 | nuScenes Train/TrainVal/Val | `nusc_trainval` | `train`, `train_val`, `val` | `boston`, `singapore` | nuScenes prediction challenge training/validation/test splits (500/200/150 scenes) | 0.5s (2Hz) | :white_check_mark: |
 | nuScenes Test | `nusc_test` | `test` | `boston`, `singapore` | nuScenes' test split, no annotations (150 scenes) | 0.5s (2Hz) | :white_check_mark: |
 | nuScenes Mini | `nusc_mini` | `mini_train`, `mini_val` | `boston`, `singapore` | nuScenes mini training/validation splits (8/2 scenes) | 0.5s (2Hz) | :white_check_mark: |
+| nuPlan Mini | `nuplan_mini` | `mini_train`, `mini_val`, `mini_test` | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan mini training/validation/test splits (942/197/224 scenes) | 0.05s (20Hz) | :white_check_mark: |
 | Lyft Level 5 Train | `lyft_train` | `train` | `palo_alto` | Lyft Level 5 training data - part 1/2 (8.4 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Train Full | `lyft_train_full` | `train` | `palo_alto` | Lyft Level 5 training data - part 2/2 (70 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Validation | `lyft_val` | `val` | `palo_alto` | Lyft Level 5 validation data (8.2 GB) | 0.1s (10Hz) | :white_check_mark: |
@@ -127,6 +128,19 @@ dataset = UnifiedDataset(
 
 **Note**: Be careful about loading multiple datasets without an associated `desired_dt` argument; many datasets do not share the same underlying data annotation frequency. To address this, we've implemented timestep interpolation to a common frequency which will ensure that all batched data shares the same dt. Interpolation can only be performed to integer multiples of the original data annotation frequency. For example, nuScenes' `dt=0.5` and the ETH BIWI dataset's `dt=0.4` can be interpolated to a common `desired_dt=0.1`.
 
+## Map API
+`trajdata` also provides an API to access the raw vector map information from datasets that provide it.
+
+```py
+from pathlib import Path
+from trajdata import MapAPI, VectorMap
+
+cache_path = Path("~/.unified_data_cache").expanduser()
+map_api = MapAPI(cache_path)
+
+vector_map: VectorMap = map_api.get_map("nusc_mini:boston-seaport")
+```
+
 ## Simulation Interface
 One additional feature of trajdata is that it can be used to initialize simulations from real data and track resulting agent motion, metrics, etc. 
 
@@ -159,7 +173,7 @@ sim_scene = SimulationScene(
 )
 
 obs: AgentBatch = sim_scene.reset()
-for t in range(1, sim_scene.scene_info.length_timesteps):
+for t in range(1, sim_scene.scene.length_timesteps):
     new_xyh_dict: Dict[str, np.ndarray] = dict()
 
     # Everything inside the forloop just sets
@@ -181,4 +195,3 @@ for t in range(1, sim_scene.scene_info.length_timesteps):
 ## TODO
 - Create a method like finalize() which writes all the batch information to a TFRecord/WebDataset/some other format which is (very) fast to read from for higher epoch training.
 - Add more examples to the README.
-

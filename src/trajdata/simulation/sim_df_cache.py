@@ -64,9 +64,7 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
         agents: List[AgentMetadata],
         future_sec: Tuple[Optional[float], Optional[float]],
     ) -> Tuple[np.ndarray, np.ndarray]:
-        last_timesteps = np.array(
-            [agent.last_timestep for agent in agents], dtype=np.long
-        )
+        last_timesteps = np.array([agent.last_timestep for agent in agents], dtype=int)
 
         if np.all(np.greater(scene_ts, last_timesteps)):
             return (

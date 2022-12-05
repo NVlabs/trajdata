@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x14vectorized_map.proto\x12\x08trajdata"\x99\x01\n\rVectorizedMap\x12&\n\x08\x65lements\x18\x01 \x03(\x0b\x32\x14.trajdata.MapElement\x12$\n\x06max_pt\x18\x02 \x01(\x0b\x32\x0f.trajdata.PointH\x00\x88\x01\x01\x12$\n\x06min_pt\x18\x03 \x01(\x0b\x32\x0f.trajdata.PointH\x01\x88\x01\x01\x42\t\n\x07_max_ptB\t\n\x07_min_pt"\xd8\x01\n\nMapElement\x12\n\n\x02id\x18\x01 \x01(\x0c\x12\'\n\troad_lane\x18\x02 \x01(\x0b\x32\x12.trajdata.RoadLaneH\x00\x12\'\n\troad_area\x18\x03 \x01(\x0b\x32\x12.trajdata.RoadAreaH\x00\x12/\n\rped_crosswalk\x18\x04 \x01(\x0b\x32\x16.trajdata.PedCrosswalkH\x00\x12+\n\x0bped_walkway\x18\x05 \x01(\x0b\x32\x14.trajdata.PedWalkwayH\x00\x42\x0e\n\x0c\x65lement_data"I\n\x05Point\x12\x0e\n\x01x\x18\x01 \x01(\x01H\x00\x88\x01\x01\x12\x0e\n\x01y\x18\x02 \x01(\x01H\x01\x88\x01\x01\x12\x0e\n\x01z\x18\x03 \x01(\x01H\x02\x88\x01\x01\x42\x04\n\x02_xB\x04\n\x02_yB\x04\n\x02_z"7\n\x08Polyline\x12\r\n\x05\x64x_mm\x18\x01 \x03(\x11\x12\r\n\x05\x64y_mm\x18\x02 \x03(\x11\x12\r\n\x05\x64z_mm\x18\x03 \x03(\x11"\xe9\x01\n\x08RoadLane\x12"\n\x06\x63\x65nter\x18\x01 \x01(\x0b\x32\x12.trajdata.Polyline\x12)\n\rleft_boundary\x18\x02 \x01(\x0b\x32\x12.trajdata.Polyline\x12*\n\x0eright_boundary\x18\x03 \x01(\x0b\x32\x12.trajdata.Polyline\x12\x13\n\x0b\x65ntry_lanes\x18\x04 \x03(\x0c\x12\x12\n\nexit_lanes\x18\x05 \x03(\x0c\x12\x1b\n\x13\x61\x64jacent_lanes_left\x18\x06 \x03(\x0c\x12\x1c\n\x14\x61\x64jacent_lanes_right\x18\x07 \x03(\x0c"d\n\x08RoadArea\x12,\n\x10\x65xterior_polygon\x18\x01 \x01(\x0b\x32\x12.trajdata.Polyline\x12*\n\x0einterior_holes\x18\x02 \x03(\x0b\x32\x12.trajdata.Polyline"3\n\x0cPedCrosswalk\x12#\n\x07polygon\x18\x01 \x01(\x0b\x32\x12.trajdata.Polyline"1\n\nPedWalkway\x12#\n\x07polygon\x18\x01 \x01(\x0b\x32\x12.trajdata.Polylineb\x06proto3'
+    b'\n\x14vectorized_map.proto\x12\x08trajdata"\xb0\x01\n\rVectorizedMap\x12\x0c\n\x04name\x18\x01 \x01(\t\x12&\n\x08\x65lements\x18\x02 \x03(\x0b\x32\x14.trajdata.MapElement\x12\x1f\n\x06max_pt\x18\x03 \x01(\x0b\x32\x0f.trajdata.Point\x12\x1f\n\x06min_pt\x18\x04 \x01(\x0b\x32\x0f.trajdata.Point\x12\'\n\x0eshifted_origin\x18\x05 \x01(\x0b\x32\x0f.trajdata.Point"\xd8\x01\n\nMapElement\x12\n\n\x02id\x18\x01 \x01(\x0c\x12\'\n\troad_lane\x18\x02 \x01(\x0b\x32\x12.trajdata.RoadLaneH\x00\x12\'\n\troad_area\x18\x03 \x01(\x0b\x32\x12.trajdata.RoadAreaH\x00\x12/\n\rped_crosswalk\x18\x04 \x01(\x0b\x32\x16.trajdata.PedCrosswalkH\x00\x12+\n\x0bped_walkway\x18\x05 \x01(\x0b\x32\x14.trajdata.PedWalkwayH\x00\x42\x0e\n\x0c\x65lement_data"(\n\x05Point\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01"F\n\x08Polyline\x12\r\n\x05\x64x_mm\x18\x01 \x03(\x11\x12\r\n\x05\x64y_mm\x18\x02 \x03(\x11\x12\r\n\x05\x64z_mm\x18\x03 \x03(\x11\x12\r\n\x05h_rad\x18\x04 \x03(\x01"\x98\x02\n\x08RoadLane\x12"\n\x06\x63\x65nter\x18\x01 \x01(\x0b\x32\x12.trajdata.Polyline\x12.\n\rleft_boundary\x18\x02 \x01(\x0b\x32\x12.trajdata.PolylineH\x00\x88\x01\x01\x12/\n\x0eright_boundary\x18\x03 \x01(\x0b\x32\x12.trajdata.PolylineH\x01\x88\x01\x01\x12\x13\n\x0b\x65ntry_lanes\x18\x04 \x03(\x0c\x12\x12\n\nexit_lanes\x18\x05 \x03(\x0c\x12\x1b\n\x13\x61\x64jacent_lanes_left\x18\x06 \x03(\x0c\x12\x1c\n\x14\x61\x64jacent_lanes_right\x18\x07 \x03(\x0c\x42\x10\n\x0e_left_boundaryB\x11\n\x0f_right_boundary"d\n\x08RoadArea\x12,\n\x10\x65xterior_polygon\x18\x01 \x01(\x0b\x32\x12.trajdata.Polyline\x12*\n\x0einterior_holes\x18\x02 \x03(\x0b\x32\x12.trajdata.Polyline"3\n\x0cPedCrosswalk\x12#\n\x07polygon\x18\x01 \x01(\x0b\x32\x12.trajdata.Polyline"1\n\nPedWalkway\x12#\n\x07polygon\x18\x01 \x01(\x0b\x32\x12.trajdata.Polylineb\x06proto3'
 )
 
 
@@ -118,19 +118,19 @@ if _descriptor._USE_C_DESCRIPTORS == False:
 
     DESCRIPTOR._options = None
     _VECTORIZEDMAP._serialized_start = 35
-    _VECTORIZEDMAP._serialized_end = 188
-    _MAPELEMENT._serialized_start = 191
-    _MAPELEMENT._serialized_end = 407
-    _POINT._serialized_start = 409
-    _POINT._serialized_end = 482
-    _POLYLINE._serialized_start = 484
-    _POLYLINE._serialized_end = 539
-    _ROADLANE._serialized_start = 542
-    _ROADLANE._serialized_end = 775
-    _ROADAREA._serialized_start = 777
-    _ROADAREA._serialized_end = 877
-    _PEDCROSSWALK._serialized_start = 879
-    _PEDCROSSWALK._serialized_end = 930
-    _PEDWALKWAY._serialized_start = 932
-    _PEDWALKWAY._serialized_end = 981
+    _VECTORIZEDMAP._serialized_end = 211
+    _MAPELEMENT._serialized_start = 214
+    _MAPELEMENT._serialized_end = 430
+    _POINT._serialized_start = 432
+    _POINT._serialized_end = 472
+    _POLYLINE._serialized_start = 474
+    _POLYLINE._serialized_end = 544
+    _ROADLANE._serialized_start = 547
+    _ROADLANE._serialized_end = 827
+    _ROADAREA._serialized_start = 829
+    _ROADAREA._serialized_end = 929
+    _PEDCROSSWALK._serialized_start = 931
+    _PEDCROSSWALK._serialized_end = 982
+    _PEDWALKWAY._serialized_start = 984
+    _PEDWALKWAY._serialized_end = 1033
 # @@protoc_insertion_point(module_scope)
