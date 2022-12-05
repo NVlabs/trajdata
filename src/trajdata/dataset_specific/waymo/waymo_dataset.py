@@ -1,3 +1,4 @@
+import warnings
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
@@ -27,6 +28,14 @@ from trajdata.data_structures import (
 )
 from waymo_open_dataset.protos.scenario_pb2 import Scenario
 
+from trajdata.proto.vectorized_map_pb2 import (
+    MapElement,
+    PedCrosswalk,
+    RoadLane,
+    VectorizedMap,
+)
+
+from ...maps import RasterizedMapMetadata, map_utils, RasterizedMap
 from ...utils import arr_utils
 
 
@@ -281,3 +290,74 @@ class WaymoDataset(RawDataset):
         )
 
         return agent_list, agent_presence
+
+    def extract_vectorized(self, scene_id: int) -> VectorizedMap:
+        vec_map = VectorizedMap()
+        scenario = self.dataset_obj.scenarios[scene_id]
+        for map_feature in scenario.map_features:
+            new_element: MapElement = vec_map.elements.add()
+            new_element.id = map_feature.id
+            if map_feature.HasField("lane"):
+                new_element.road_lane = waymo_utils.translate_lane(map_feature.lane)
+            if map_feature.HasField("crosswalk"):
+                new_element.ped_crosswalk = waymo_utils.translate_crosswalk(map_feature.crosswalk)
+        return vec_map
+
+    def cache_map(self, scene_id: int, cache_path: Path,  map_cache_class: Type[SceneCache], map_params: Dict[str, Any]):
+        resolution: float = map_params["px_per_m"]
+        scenario = self.dataset_obj.scenarios[scene_id]
+
+        if map_params.get("original_format", False):
+            warnings.warn(
+                "Using a dataset's original map format is deprecated, and will be removed in the next version of trajdata!",
+                FutureWarning,
+            )
+            map_from_world: np.ndarray = np.array(
+                [[resolution, 0.0, 0.0], [0.0, resolution, 0.0], [0.0, 0.0, 1.0]]
+            )
+            layer_names: List[str] = [
+                # TODO: Figure out
+            ]
+            map_info: RasterizedMapMetadata = RasterizedMapMetadata(
+                name=map_name,
+                shape=(len(layer_names), height_px, width_px), # TODO: Figure out
+                layers=layer_names,
+                layer_rgb_groups=(), # TODO: Figure out
+                resolution=resolution,
+                map_from_world=map_from_world,
+            )
+            map_cache_class.cache_map_layers(
+                cache_path, VectorizedMap(), map_info, layer_fn, self.name # TODO: Figure out
+            )
+        else:
+            vectorized_map: VectorizedMap = self.extract_vectorized(scene_id)
+            pbar_kwargs = {"position": 2, "leave": False}
+            map_data, map_from_world = map_utils.rasterize_map(
+                vectorized_map, resolution, **pbar_kwargs
+            )
+
+            rasterized_map_info: RasterizedMapMetadata = RasterizedMapMetadata(
+                name=scenario.scenario_id,
+                shape=map_data.shape,
+                layers=["drivable_area", "lane_divider", "ped_area"],
+                layer_rgb_groups=([0], [1], [2]),
+                resolution=resolution,
+                map_from_world=map_from_world,
+            )
+
+            rasterized_map_obj: RasterizedMap = RasterizedMap(
+                rasterized_map_info, map_data
+            )
+
+            map_cache_class.cache_map(
+                cache_path, vectorized_map, rasterized_map_obj, self.name
+            )
+
+    def cache_maps(
+            self,
+            cache_path: Path,
+            map_cache_class: Type[SceneCache],
+            map_params: Dict[str, Any],
+    ) -> None:
+        for i in range(len(self.dataset_obj.scenarios)):
+            self.cache_map(i, cache_path, map_cache_class, map_params)

@@ -71,9 +71,7 @@ message RoadLane {
 message RoadArea {
   // The polygon defining the outline of general driveable area. This acts as a 
   // catch-all when there's a road segment without lane information.
-  // For example, intersections in nuScenes are not "lanes".
-  Polyline exterior_polygon = 1;
-
+  // For)
   // The area within these polygons is NOT included.
   repeated Polyline interior_holes = 2;
 }
