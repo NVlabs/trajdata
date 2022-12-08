@@ -1,18 +1,22 @@
 import pathlib
-from typing import List
-
+from typing import List, Final
+import time
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import copy
-
+from multiprocessing import Pool
 from waymo_open_dataset.protos import scenario_pb2, map_pb2
 from trajdata.proto import vectorized_map_pb2
-from src.trajdata.utils import arr_utils
 
-WAYMO_DT = 0.1
-
-data_dir = "../../../../../scenarios"
+WAYMO_DT: Final[float] = 0.1
+SOURCE_DIR = "../../../../../scenarios"
+DATASET_NAMES = ["testing",
+                 "testing_interactive",
+                 "training",
+                 "training_20s",
+                 "validation",
+                 "validation_interactive"]
 from trajdata.data_structures.agent import (
     Agent,
     AgentMetadata,
@@ -20,58 +24,40 @@ from trajdata.data_structures.agent import (
     FixedExtent, VariableExtent
 )
 
+def parse_data(data):
+    scenario = scenario_pb2.Scenario()
+    scenario.ParseFromString(data)
+    return scenario
+class WaymoScenarios:
+    def __init__(self, dataset_name, source_dir=SOURCE_DIR, load=True, num_parallel_reads=None):
+        self.name = dataset_name
+        self.source_dir = source_dir
+        self.scenarios = []
+        if load:
+            self.load_scenarios(num_parallel_reads)
+    def load_scenarios(self, num_parallel_reads, verbose=True):
+        self.scenarios = []
+        source_it = pathlib.Path().glob(self.source_dir+'/'+self.name + "/*.tfrecord")
+        file_names = [str(file_name) for file_name in source_it if file_name.is_file()]
+        if verbose:
+            print("Loading tfrecord files...")
+        dataset = tf.data.TFRecordDataset(file_names, compression_type='', num_parallel_reads=num_parallel_reads).as_numpy_iterator()
 
-def load_single_tfrecord(file_name, verbose=False):
-    dataset = tf.data.TFRecordDataset(file_name, compression_type='')
-    dataset_it = dataset.as_numpy_iterator()
-    scenarios = []
-    for data in dataset_it:
-        scenario = scenario_pb2.Scenario()
-        scenario.ParseFromString(bytearray(data))
-        scenarios.append(copy.deepcopy(scenario))
-
-    if verbose:
-        print("\n\nFile name: " + file_name)
-        print("Num scenes: ", len(scenarios))
-        print("Scenario 1 info:")
-        print("\tID: ", scenarios[0].scenario_id)
-        print("\tTimestamps: ", scenarios[0].timestamps_seconds)
-        print("\tCurrent Timestamp: ", scenarios[0].current_time_index)
-        print("\tNum Tracks: ", len(scenarios[0].tracks))
-        print("\tNum Dynamic States: ", len(scenarios[0].dynamic_map_states))
-        print("\tNum Map Features: ", len(scenarios[0].map_features))
-        print("\tsdc_track_index ", scenarios[0].sdc_track_index)
-        tracks = scenarios[516].tracks[scenarios[516].sdc_track_index - 2]
-        for i in range(91):
-            print(tracks.states[i].length, tracks.states[i].width, tracks.states[i].height)
-            print(tracks.states[i].valid)
-
-    return scenarios
-
-
-def load_tfrecords(source_dir, verbose=False):
-    scenarios = []
-    source_it = pathlib.Path().glob(source_dir + "/*.tfrecord")
-    file_names = [str(file_name) for file_name in source_it if file_name.is_file()]
-    for file_name in file_names:
-        scenarios.extend(load_single_tfrecord(file_name, verbose))
-    return scenarios
+        if verbose:
+            print("Converting to protobufs...")
+        start = time.perf_counter()
+        dataset = np.fromiter(dataset, bytearray)
+        # use multiprocessing:
+        # self.scenarios = Pool().map(parse_data, dataset)
+        # use np vectorization (faster in my computer):
+        parser = np.vectorize(parse_data)
+        self.scenarios = parser(dataset)
+        print(time.perf_counter()-start)
+        if verbose:
+            print(str(len(self.scenarios)) + " scenarios from " + str(len(file_names)) + " file(s) have been loaded successfully")
 
 
-# print("Training Data: ")
-# load_tfrecords(data_dir + '/training', True)
-# print("Training_20s Data: ")
-# load_tfrecords(data_dir + '/training_20s', True)
-# print("Testing Data: ")
-# load_tfrecords(data_dir + '/testing', True)
-# print("Testing_interactive Data: ")
-# load_tfrecords(data_dir + '/testing_interactive', True)
-# print("Validation Data: ")
-# load_tfrecords(data_dir + '/validation', True)
-# print("Validation_interactive Data: ")
-# load_tfrecords(data_dir + '/validation_interactive', True)
-
-
+way = WaymoScenarios(dataset_name='training')
 def translate_agent_type(type):
     if type == scenario_pb2.Track.ObjectType.TYPE_VEHICLE:
         return AgentType.VEHICLE
@@ -109,11 +95,6 @@ def translate_crosswalk(lane: map_pb2.Crosswalk) -> vectorized_map_pb2.PedCrossw
     ret.polygon = translate_poly_line(lane.polygon)
     return ret
 
-
-class WaymoScenarios:
-    def __init__(self, source_dir):
-        self.name = source_dir
-        self.scenarios = load_tfrecords(source_dir)
 
 # agent_list: List[AgentMetadata] = []
 # agent_presence: List[List[AgentMetadata]] = [
