@@ -11,7 +11,7 @@ from trajdata.proto import vectorized_map_pb2
 
 WAYMO_DT: Final[float] = 0.1
 SOURCE_DIR = "../../../../../scenarios"
-DATASET_NAMES = ["testing",
+WAYMO_DATASET_NAMES = ["testing",
                  "testing_interactive",
                  "training",
                  "training_20s",
@@ -30,6 +30,8 @@ def parse_data(data):
     return scenario
 class WaymoScenarios:
     def __init__(self, dataset_name, source_dir=SOURCE_DIR, load=True, num_parallel_reads=None):
+        if dataset_name not in WAYMO_DATASET_NAMES:
+            raise RuntimeError('Wrong dataset name. Please choose name from '+str(WAYMO_DATASET_NAMES))
         self.name = dataset_name
         self.source_dir = source_dir
         self.scenarios = []
@@ -57,7 +59,7 @@ class WaymoScenarios:
             print(str(len(self.scenarios)) + " scenarios from " + str(len(file_names)) + " file(s) have been loaded successfully")
 
 
-way = WaymoScenarios(dataset_name='training')
+# way = WaymoScenarios(dataset_name='haha')
 def translate_agent_type(type):
     if type == scenario_pb2.Track.ObjectType.TYPE_VEHICLE:
         return AgentType.VEHICLE
