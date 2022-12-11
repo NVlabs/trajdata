@@ -69,6 +69,11 @@ class WaymoScenarios:
 def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
     vec_map = vectorized_map_pb2.VectorizedMap()
     vec_map.name = map_name
+    shifted_origin = vectorized_map_pb2.Point()
+    shifted_origin.x = 0.0
+    shifted_origin.y = 0.0
+    shifted_origin.z = 0.0
+    vec_map.shifted_origin.CopyFrom(shifted_origin)
     max_pt = vectorized_map_pb2.Point()
     max_pt.x = 0.0
     max_pt.y = 0.0
