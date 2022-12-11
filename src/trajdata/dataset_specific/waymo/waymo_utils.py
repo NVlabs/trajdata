@@ -6,6 +6,8 @@ import pandas as pd
 import tensorflow as tf
 import copy
 from multiprocessing import Pool
+
+from tqdm import tqdm
 from waymo_open_dataset.protos import scenario_pb2, map_pb2 as waymo_map_pb2
 
 from trajdata.maps import TrafficLightStatus
@@ -70,7 +72,7 @@ def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -
     max_pt: vectorized_map_pb2.Point
     max_x = np.max()
     min_pt: vectorized_map_pb2.Point
-    for map_feature in map_features:
+    for map_feature in tqdm(map_features, desc="Converting the waymo map features into vector map"):
         new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
         new_element.id = map_feature.id
         if map_feature.HasField("lane"):
