@@ -6,8 +6,11 @@ import pandas as pd
 import tensorflow as tf
 import copy
 from multiprocessing import Pool
-from waymo_open_dataset.protos import scenario_pb2, map_pb2
+from waymo_open_dataset.protos import scenario_pb2, map_pb2 as waymo_map_pb2
+
+
 from trajdata.proto import vectorized_map_pb2
+
 
 WAYMO_DT: Final[float] = 0.1
 SOURCE_DIR = "../../../../../scenarios"
@@ -51,7 +54,7 @@ class WaymoScenarios:
         dataset = np.fromiter(dataset, bytearray)
         # use multiprocessing:
         # self.scenarios = Pool().map(parse_data, dataset)
-        # use np vectorization (faster in my computer):
+        # use np vectorization (faster with my computer):
         parser = np.vectorize(parse_data)
         self.scenarios = parser(dataset)
         print(time.perf_counter()-start)
@@ -60,19 +63,35 @@ class WaymoScenarios:
 
 
 # way = WaymoScenarios(dataset_name='haha')
-def translate_agent_type(type):
-    if type == scenario_pb2.Track.ObjectType.TYPE_VEHICLE:
+
+def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
+    vec_map = vectorized_map_pb2.VectorizedMap()
+    vec_map.name = map_name
+    max_pt: vectorized_map_pb2.Point
+    max_x = np.max()
+    min_pt: vectorized_map_pb2.Point
+    for map_feature in map_features:
+        new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
+        new_element.id = map_feature.id
+        if map_feature.HasField("lane"):
+            new_element.road_lane = translate_lane(map_feature.lane)
+        if map_feature.HasField("crosswalk"):
+            new_element.ped_crosswalk = translate_crosswalk(map_feature.crosswalk)
+    return vec_map
+
+def translate_agent_type(agent_type):
+    if agent_type == scenario_pb2.Track.ObjectType.TYPE_VEHICLE:
         return AgentType.VEHICLE
-    if type == scenario_pb2.Track.ObjectType.TYPE_PEDESTRIAN:
+    if agent_type == scenario_pb2.Track.ObjectType.TYPE_PEDESTRIAN:
         return AgentType.PEDESTRIAN
-    if type == scenario_pb2.Track.ObjectType.TYPE_CYCLIST:
+    if agent_type == scenario_pb2.Track.ObjectType.TYPE_CYCLIST:
         return AgentType.BICYCLE
-    if type == scenario_pb2.Track.ObjectType.OTHER:
+    if agent_type == scenario_pb2.Track.ObjectType.OTHER:
         return AgentType.UNKNOWN
     return -1
 
 
-def translate_poly_line(polyline: List[map_pb2.MapPoint]) -> vectorized_map_pb2.Polyline:
+def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> vectorized_map_pb2.Polyline:
     ret = vectorized_map_pb2.Polyline()
     for point in polyline:
         ret.dx_mm.add(round(point.x * 100))
@@ -81,18 +100,31 @@ def translate_poly_line(polyline: List[map_pb2.MapPoint]) -> vectorized_map_pb2.
     return ret
 
 
-def translate_lane(lane: map_pb2.LaneCenter) -> vectorized_map_pb2.RoadLane:
+def translate_lane(lane: waymo_map_pb2.LaneCenter) -> vectorized_map_pb2.RoadLane:
     ret = vectorized_map_pb2.RoadLane
-    ret.left_boundary = translate_poly_line(lane.polyline[lane.left_bounaries.lane_start_index:lane.left_bounaries.lane_end_index])
-    ret.right_boundary = translate_poly_line(lane.polyline[lane.right_bounaries.lane_start_index:lane.right_bounaries.lane_end_index])
-    ret.entry_lanes = lane.entry_lanes
-    ret.exit_lanes = lane.exit_lanes
-    ret.adjacent_lanes_left = [neighbor.feature_id for neighbor in lane.left_neighbors]
-    ret.adjacent_lanes_right = [neighbor.feature_id for neighbor in lane.right_neighbors]
+    # Waymo lane only gives boundary indices and no center indices
+    indices = [lane.left_boundaries.lane_start_index,
+               lane.left_bounaries.lane_end_index,
+               lane.right_boundaries.lane_start_index,
+               lane.right_bounaries.lane_end_index]
+    indices.sort()
+    left_boundary: List[waymo_map_pb2.MapPoint] = \
+        lane.polyline[lane.left_boundaries.lane_start_index:lane.left_bounaries.lane_end_index]
+    right_boundary: List[waymo_map_pb2.MapPoint] = \
+        lane.polyline[lane.right_boundaries.lane_start_index:lane.right_bounaries.lane_end_index]
+    center = lane.polyline[:indices[0]] + lane.polyline[indices[1]:indices[2]] + lane.polyline[indices[3]:]
+    ret.center = translate_poly_line(center)
+    ret.left_boundary = translate_poly_line(left_boundary)
+    ret.right_boundary = translate_poly_line(right_boundary)
+
+    ret.entry_lanes[:] = lane.entry_lanes.copy()
+    ret.exit_lanes[:] = lane.exit_lanes.copy()
+    ret.adjacent_lanes_left[:] = [neighbor.feature_id for neighbor in lane.left_neighbors]
+    ret.adjacent_lanes_right[:] = [neighbor.feature_id for neighbor in lane.right_neighbors]
     return ret
 
 
-def translate_crosswalk(lane: map_pb2.Crosswalk) -> vectorized_map_pb2.PedCrosswalk:
+def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> vectorized_map_pb2.PedCrosswalk:
     ret = vectorized_map_pb2.PedCrosswalk()
     ret.polygon = translate_poly_line(lane.polygon)
     return ret
