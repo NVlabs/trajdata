@@ -151,8 +151,8 @@ def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLa
     ret.left_boundary, left_max, left_min = translate_poly_line(left_boundary)
     ret.right_boundary, right_max, right_min = translate_poly_line(right_boundary)
 
-    ret.entry_lanes[:] = lane.entry_lanes.copy()
-    ret.exit_lanes[:] = lane.exit_lanes.copy()
+    ret.entry_lanes[:] = lane.entry_lanes
+    ret.exit_lanes[:] = lane.exit_lanes
     ret.adjacent_lanes_left[:] = [neighbor.feature_id for neighbor in lane.left_neighbors]
     ret.adjacent_lanes_right[:] = [neighbor.feature_id for neighbor in lane.right_neighbors]
     max_point = [ np.max([center_max[i], left_max[i], right_max[i]]) for i in range(3)]
