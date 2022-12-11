@@ -190,6 +190,8 @@ class WaymoDataset(RawDataset):
             agent_ids.append(agent_name)
 
             agent_type: AgentType = translate_agent_type(track.object_type)
+            if agent_type == -1:
+                continue
             agent_ml_class.append(agent_type)
             states = track.states
             translations = [[state.center_x, state.center_y, state.center_z] for state in states]
@@ -300,10 +302,14 @@ class WaymoDataset(RawDataset):
                   cache_path: Path,
                   map_cache_class: Type[SceneCache],
                   map_params: Dict[str, Any]):
-        map_features: List[MapFeature] = self.dataset_obj.scenarios[scene_id].map_features
-
-        vector_map_proto: VectorizedMap = waymo_utils.extract_vectorized(map_features, f"{self.name}:{scene_id}")
+        vector_map_proto: VectorizedMap = waymo_utils.extract_vectorized(
+            map_features=self.dataset_obj.scenarios[scene_id].map_features,
+            map_name=f"{self.name}:{scene_id}")
         vector_map: VectorMap = VectorMap.from_proto(vector_map_proto, incl_road_lanes=True, incl_ped_crosswalks=True)
+
+        vector_map.associate_scene_data(
+            waymo_utils.extract_traffic_lights(
+                dynamic_states=self.dataset_obj.scenarios[scene_id].dynamic_map_states))
         map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)
 
     def cache_maps(

@@ -1,5 +1,5 @@
 import pathlib
-from typing import List, Final
+from typing import List, Final, Tuple, Dict
 import time
 import numpy as np
 import pandas as pd
@@ -8,7 +8,7 @@ import copy
 from multiprocessing import Pool
 from waymo_open_dataset.protos import scenario_pb2, map_pb2 as waymo_map_pb2
 
-
+from trajdata.maps import TrafficLightStatus
 from trajdata.proto import vectorized_map_pb2
 
 
@@ -129,6 +129,32 @@ def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> vectorized_map_pb2.Ped
     ret.polygon = translate_poly_line(lane.polygon)
     return ret
 
+def extract_traffic_lights(dynamic_states: List[scenario_pb2.DynamicMapState]) -> Dict[Tuple[int, int], TrafficLightStatus]:
+    ret: Dict[Tuple[int, int], TrafficLightStatus] = {}
+    for i, lane_states in enumerate(dynamic_states):
+        for lane_state in lane_states:
+            ret[(lane_state.lane, i)] = translate_traffic_state(lane_state.state)
+    return ret
+
+def translate_traffic_state(state: waymo_map_pb2.TrafficSignalLaneState.State) -> TrafficLightStatus:
+    # The traffic light type doesn't align between waymo and trajdata,
+    # but I think trajdata TrafficLightStatus should include yellow light
+    # for now I let caution = red
+    green = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_GO,
+             waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_GO,
+             ]
+    red = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_CAUTION,
+           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_STOP,
+           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_STOP,
+           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_CAUTION,
+           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_FLASHING_STOP,
+           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_FLASHING_CAUTION,
+           ]
+    if state in green:
+        return TrafficLightStatus.GREEN
+    if state in red:
+        return TrafficLightStatus.RED
+    return TrafficLightStatus.UNKNOWN
 
 # agent_list: List[AgentMetadata] = []
 # agent_presence: List[List[AgentMetadata]] = [
