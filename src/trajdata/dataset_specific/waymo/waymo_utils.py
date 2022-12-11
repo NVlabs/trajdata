@@ -69,16 +69,30 @@ class WaymoScenarios:
 def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
     vec_map = vectorized_map_pb2.VectorizedMap()
     vec_map.name = map_name
-    max_pt: vectorized_map_pb2.Point
-    max_x = np.max()
-    min_pt: vectorized_map_pb2.Point
+    max_pt = vectorized_map_pb2.Point()
+    max_pt.x = 0.0
+    max_pt.y = 0.0
+    max_pt.z = 0.0
+    min_pt = vectorized_map_pb2.Point()
+    min_pt.x = 0.0
+    min_pt.y = 0.0
+    min_pt.z = 0.0
+
     for map_feature in tqdm(map_features, desc="Converting the waymo map features into vector map"):
         new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
         new_element.id = map_feature.id
         if map_feature.HasField("lane"):
-            new_element.road_lane = translate_lane(map_feature.lane)
-        if map_feature.HasField("crosswalk"):
-            new_element.ped_crosswalk = translate_crosswalk(map_feature.crosswalk)
+            road_lane, temp_max_pt, temp_min_pt = translate_lane(map_feature.lane)
+            new_element.road_lane.CopyFrom(road_lane)
+        elif map_feature.HasField("crosswalk"):
+            ped_crosswalk, temp_max_pt, temp_min_pt = translate_crosswalk(map_feature.crosswalk)
+            new_element.ped_crosswalk.CopyFrom(ped_crosswalk)
+        else:
+            continue
+        max_pt.x, max_pt.y, max_pt.z = get_larger_elems([max_pt.x, max_pt.y, max_pt.z], temp_max_pt)
+        min_pt.x, min_pt.y, min_pt.z = get_smaller_elems([min_pt.x, min_pt.y, min_pt.z], temp_min_pt)
+    vec_map.max_pt.CopyFrom(max_pt)
+    vec_map.min_pt.CopyFrom(min_pt)
     return vec_map
 
 def translate_agent_type(agent_type):
@@ -92,17 +106,30 @@ def translate_agent_type(agent_type):
         return AgentType.UNKNOWN
     return -1
 
+def get_larger_elems(list1, list2):
+    if list1 != list2:
+        return -1
+    return [np.max([list1[i], list2[i]]) for i in range(len(list1))]
 
-def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> vectorized_map_pb2.Polyline:
+def get_smaller_elems(list1, list2):
+    if list1 != list2:
+        return -1
+    return [np.min([list1[i], list2[i]]) for i in range(len(list1))]
+
+def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> (vectorized_map_pb2.Polyline, List[int, int, int], List[int, int, int]):
     ret = vectorized_map_pb2.Polyline()
+    max_pt = [0.0, 0.0, 0.0]
+    min_pt = [0.0, 0.0, 0.0]
     for point in polyline:
         ret.dx_mm.add(round(point.x * 100))
         ret.dy_mm.add(round(point.y * 100))
         ret.dz_mm.add(round(point.z * 100))
-    return ret
+        max_pt = get_larger_elems(max_pt, [point.x, point.y, point.z])
+        min_pt = get_smaller_elems(min_pt, [point.x, point.y, point.z])
+    return ret, max_pt, min_pt
 
 
-def translate_lane(lane: waymo_map_pb2.LaneCenter) -> vectorized_map_pb2.RoadLane:
+def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLane, List[int, int, int], List[int, int, int]):
     ret = vectorized_map_pb2.RoadLane
     # Waymo lane only gives boundary indices and no center indices
     indices = [lane.left_boundaries.lane_start_index,
@@ -115,21 +142,23 @@ def translate_lane(lane: waymo_map_pb2.LaneCenter) -> vectorized_map_pb2.RoadLan
     right_boundary: List[waymo_map_pb2.MapPoint] = \
         lane.polyline[lane.right_boundaries.lane_start_index:lane.right_bounaries.lane_end_index]
     center = lane.polyline[:indices[0]] + lane.polyline[indices[1]:indices[2]] + lane.polyline[indices[3]:]
-    ret.center = translate_poly_line(center)
-    ret.left_boundary = translate_poly_line(left_boundary)
-    ret.right_boundary = translate_poly_line(right_boundary)
+    ret.center, center_max, center_min = translate_poly_line(center)
+    ret.left_boundary, left_max, left_min = translate_poly_line(left_boundary)
+    ret.right_boundary, right_max, right_min = translate_poly_line(right_boundary)
 
     ret.entry_lanes[:] = lane.entry_lanes.copy()
     ret.exit_lanes[:] = lane.exit_lanes.copy()
     ret.adjacent_lanes_left[:] = [neighbor.feature_id for neighbor in lane.left_neighbors]
     ret.adjacent_lanes_right[:] = [neighbor.feature_id for neighbor in lane.right_neighbors]
-    return ret
+    max_point = [ np.max([center_max[i], left_max[i], right_max[i]]) for i in range(3)]
+    min_point = [ np.min([center_min[i], left_min[i], right_min[i]]) for i in range(3)]
+    return ret, max_point, min_point
 
 
-def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> vectorized_map_pb2.PedCrosswalk:
+def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> (vectorized_map_pb2.PedCrosswalk, List[int, int, int], List[int, int, int]):
     ret = vectorized_map_pb2.PedCrosswalk()
-    ret.polygon = translate_poly_line(lane.polygon)
-    return ret
+    ret.polygon, max_pt, min_pt = translate_poly_line(lane.polygon)
+    return ret, max_pt, min_pt
 
 def extract_traffic_lights(dynamic_states: List[scenario_pb2.DynamicMapState]) -> Dict[Tuple[int, int], TrafficLightStatus]:
     ret: Dict[Tuple[int, int], TrafficLightStatus] = {}
