@@ -82,62 +82,76 @@ class AgentBatch:
 
     def for_agent_type(self, agent_type: AgentType) -> AgentBatch:
         match_type = self.agent_type == agent_type
+        return self.filter_batch(match_type)
+
+    def filter_batch(self, filter_mask: torch.Tensor) -> AgentBatch:
+        """Build a new batch with elements for which filter_mask[i] == True."""
+
+        # Some of the tensors might be on different devices, so we define some convenience functions
+        # to make sure the filter_mask is always on the same device as the tensor we are indexing.
+        filter_mask_dict = {}
+        filter_mask_dict["cpu"] = filter_mask.to("cpu")
+        filter_mask_dict[str(self.agent_hist.device)] = filter_mask.to(
+            self.agent_hist.device
+        )
+
+        _filter = lambda tensor: tensor[filter_mask_dict[str(tensor.device)]]
+        _filter_tensor_or_list = lambda tensor_or_list: (
+            _filter(tensor_or_list)
+            if isinstance(tensor_or_list, torch.Tensor)
+            else type(tensor_or_list)(
+                [
+                    el
+                    for idx, el in enumerate(tensor_or_list)
+                    if filter_mask_dict["cpu"][idx]
+                ]
+            )
+        )
+
         return AgentBatch(
-            data_idx=self.data_idx[match_type],
-            scene_ts=self.scene_ts[match_type],
-            dt=self.dt[match_type],
-            agent_name=[
-                name for idx, name in enumerate(self.agent_name) if match_type[idx]
-            ],
-            agent_type=agent_type.value,
-            curr_agent_state=self.curr_agent_state[match_type],
-            agent_hist=self.agent_hist[match_type],
-            agent_hist_extent=self.agent_hist_extent[match_type],
-            agent_hist_len=self.agent_hist_len[match_type],
-            agent_fut=self.agent_fut[match_type],
-            agent_fut_extent=self.agent_fut_extent[match_type],
-            agent_fut_len=self.agent_fut_len[match_type],
-            num_neigh=self.num_neigh[match_type],
-            neigh_types=self.neigh_types[match_type],
-            neigh_hist=self.neigh_hist[match_type],
-            neigh_hist_extents=self.neigh_hist_extents[match_type],
-            neigh_hist_len=self.neigh_hist_len[match_type],
-            neigh_fut=self.neigh_fut[match_type],
-            neigh_fut_extents=self.neigh_fut_extents[match_type],
-            neigh_fut_len=self.neigh_fut_len[match_type],
-            robot_fut=self.robot_fut[match_type]
-            if self.robot_fut is not None
-            else None,
-            robot_fut_len=self.robot_fut_len[match_type]
+            data_idx=_filter(self.data_idx),
+            scene_ts=_filter(self.scene_ts),
+            dt=_filter(self.dt),
+            agent_name=_filter_tensor_or_list(self.agent_name),
+            agent_type=_filter(self.agent_type),
+            curr_agent_state=_filter(self.curr_agent_state),
+            agent_hist=_filter(self.agent_hist),
+            agent_hist_extent=_filter(self.agent_hist_extent),
+            agent_hist_len=_filter(self.agent_hist_len),
+            agent_fut=_filter(self.agent_fut),
+            agent_fut_extent=_filter(self.agent_fut_extent),
+            agent_fut_len=_filter(self.agent_fut_len),
+            num_neigh=_filter(self.num_neigh),
+            neigh_types=_filter(self.neigh_types),
+            neigh_hist=_filter(self.neigh_hist),
+            neigh_hist_extents=_filter(self.neigh_hist_extents),
+            neigh_hist_len=_filter(self.neigh_hist_len),
+            neigh_fut=_filter(self.neigh_fut),
+            neigh_fut_extents=_filter(self.neigh_fut_extents),
+            neigh_fut_len=_filter(self.neigh_fut_len),
+            robot_fut=_filter(self.robot_fut) if self.robot_fut is not None else None,
+            robot_fut_len=_filter(self.robot_fut_len)
             if self.robot_fut_len is not None
             else None,
-            map_names=[
-                name for idx, name in enumerate(self.map_names) if match_type[idx]
-            ]
+            map_names=_filter_tensor_or_list(self.map_names)
             if self.map_names is not None
             else None,
-            maps=self.maps[match_type] if self.maps is not None else None,
-            maps_resolution=self.maps_resolution[match_type]
+            maps=_filter(self.maps) if self.maps is not None else None,
+            maps_resolution=_filter(self.maps_resolution)
             if self.maps_resolution is not None
             else None,
-            vector_maps=[
-                vector_map
-                for idx, vector_map in enumerate(self.vector_maps)
-                if match_type[idx]
-            ]
+            vector_maps=_filter(self.vector_maps)
             if self.vector_maps is not None
             else None,
-            rasters_from_world_tf=self.rasters_from_world_tf[match_type]
+            rasters_from_world_tf=_filter(self.rasters_from_world_tf)
             if self.rasters_from_world_tf is not None
             else None,
-            agents_from_world_tf=self.agents_from_world_tf[match_type],
-            scene_ids=[
-                scene_id
-                for idx, scene_id in enumerate(self.scene_ids)
-                if match_type[idx]
-            ],
+            agents_from_world_tf=_filter(self.agents_from_world_tf),
+            scene_ids=_filter_tensor_or_list(self.scene_ids),
             history_pad_dir=self.history_pad_dir,
-            extras={key: val[match_type] for key, val in self.extras},
+            extras={
+                key: _filter_tensor_or_list(val) for key, val in self.extras.items()
+            },
         )
 
 
@@ -175,6 +189,7 @@ class SceneBatch:
             "map_names",
             "vector_maps",
             "history_pad_dir",
+            "scene_ids",
             "extras",
         }
 
@@ -184,64 +199,152 @@ class SceneBatch:
                 setattr(self, val, tensor_val.to(device))
 
         for key, val in self.extras.items():
-            self.extras[key] = val.to(device)
+            # Allow for custom .to() method for objects that define a __to__ function.
+            if hasattr(val, "__to__"):
+                self.extras[key] = val.__to__(device, non_blocking=True)
+            else:
+                self.extras[key] = val.to(device, non_blocking=True)
 
     def agent_types(self) -> List[AgentType]:
         unique_types: Tensor = torch.unique(self.agent_type)
-        return [AgentType(unique_type.item()) for unique_type in unique_types]
+        return [
+            AgentType(unique_type.item())
+            for unique_type in unique_types
+            if unique_type >= 0
+        ]
 
     def for_agent_type(self, agent_type: AgentType) -> SceneBatch:
         match_type = self.agent_type == agent_type
+        return self.filter_batch(match_type)
+
+    def filter_batch(self, filter_mask: torch.tensor) -> SceneBatch:
+        """Build a new batch with elements for which filter_mask[i] == True."""
+
+        # Some of the tensors might be on different devices, so we define some convenience functions
+        # to make sure the filter_mask is always on the same device as the tensor we are indexing.
+        filter_mask_dict = {}
+        filter_mask_dict["cpu"] = filter_mask.to("cpu")
+        filter_mask_dict[str(self.agent_hist.device)] = filter_mask.to(
+            self.agent_hist.device
+        )
+
+        _filter = lambda tensor: tensor[filter_mask_dict[str(tensor.device)]]
+        _filter_tensor_or_list = lambda tensor_or_list: (
+            _filter(tensor_or_list)
+            if isinstance(tensor_or_list, torch.Tensor)
+            else type(tensor_or_list)(
+                [
+                    el
+                    for idx, el in enumerate(tensor_or_list)
+                    if filter_mask_dict["cpu"][idx]
+                ]
+            )
+        )
+
         return SceneBatch(
-            data_idx=self.data_idx[match_type],
-            scene_ts=self.scene_ts[match_type],
-            dt=self.dt[match_type],
-            num_agents=self.num_agents[match_type],
-            agent_type=self.agent_type[match_type],
-            centered_agent_state=self.centered_agent_state[match_type],
-            agent_names=[
-                agent_name
-                for idx, agent_name in enumerate(self.agent_names)
-                if match_type[idx]
-            ],
-            agent_hist=self.agent_hist[match_type],
-            agent_hist_extent=self.agent_hist_extent[match_type],
-            agent_hist_len=self.agent_hist_len[match_type],
-            agent_fut=self.agent_fut[match_type],
-            agent_fut_extent=self.agent_fut_extent[match_type],
-            agent_fut_len=self.agent_fut_len[match_type],
-            robot_fut=self.robot_fut[match_type]
-            if self.robot_fut is not None
-            else None,
-            robot_fut_len=self.robot_fut_len[match_type]
+            data_idx=_filter(self.data_idx),
+            scene_ts=_filter(self.scene_ts),
+            dt=_filter(self.dt),
+            num_agents=_filter(self.num_agents),
+            agent_type=_filter(self.agent_type),
+            centered_agent_state=_filter(self.centered_agent_state),
+            agent_hist=_filter(self.agent_hist),
+            agent_hist_extent=_filter(self.agent_hist_extent),
+            agent_hist_len=_filter(self.agent_hist_len),
+            agent_fut=_filter(self.agent_fut),
+            agent_fut_extent=_filter(self.agent_fut_extent),
+            agent_fut_len=_filter(self.agent_fut_len),
+            robot_fut=_filter(self.robot_fut) if self.robot_fut is not None else None,
+            robot_fut_len=_filter(self.robot_fut_len)
             if self.robot_fut_len is not None
             else None,
-            map_names=[
-                name for idx, name in enumerate(self.map_names) if match_type[idx]
-            ]
+            map_names=_filter_tensor_or_list(self.map_names)
             if self.map_names is not None
             else None,
-            maps=self.maps[match_type] if self.maps is not None else None,
-            maps_resolution=self.maps_resolution[match_type]
+            maps=_filter(self.maps) if self.maps is not None else None,
+            maps_resolution=_filter(self.maps_resolution)
             if self.maps_resolution is not None
             else None,
-            vector_maps=[
-                vector_map
-                for idx, vector_map in enumerate(self.vector_maps)
-                if match_type[idx]
-            ]
+            vector_maps=_filter(self.vector_maps)
             if self.vector_maps is not None
             else None,
-            rasters_from_world_tf=self.rasters_from_world_tf[match_type]
+            rasters_from_world_tf=_filter(self.rasters_from_world_tf)
             if self.rasters_from_world_tf is not None
             else None,
-            centered_agent_from_world_tf=self.centered_agent_from_world_tf[match_type],
-            centered_world_from_agent_tf=self.centered_world_from_agent_tf[match_type],
-            scene_ids=[
-                scene_id
-                for idx, scene_id in enumerate(self.scene_ids)
-                if match_type[idx]
-            ],
+            centered_agent_from_world_tf=_filter(self.centered_agent_from_world_tf),
+            centered_world_from_agent_tf=_filter(self.centered_world_from_agent_tf),
+            scene_ids=_filter_tensor_or_list(self.scene_ids),
             history_pad_dir=self.history_pad_dir,
-            extras={key: val[match_type] for key, val in self.extras},
+            extras={
+                key: _filter_tensor_or_list(val, filter_mask)
+                for key, val in self.extras.items()
+            },
+        )
+
+    def to_agent_batch(self, agent_inds: torch.Tensor) -> AgentBatch:
+        """
+        Converts SeceneBatch to AgentBatch for agents defined by `agent_inds`.
+
+        self.extras will be simply copied over, any custom conversion must be
+        implemented externally.
+        """
+
+        batch_size = self.agent_hist.shape[0]
+        num_agents = self.agent_hist.shape[1]
+
+        if agent_inds.ndim != 1 or agent_inds.shape[0] != batch_size:
+            raise ValueError("Wrong shape for agent_inds, expected [batch_size].")
+
+        if (agent_inds < 0).any() or (agent_inds >= num_agents).any():
+            raise ValueError("Invalid agent index")
+
+        batch_inds = torch.arange(batch_size)
+        others_mask = torch.ones((batch_size, num_agents), dtype=torch.bool)
+        others_mask[batch_inds, agent_inds] = False
+        index_agent = lambda x: x[batch_inds, agent_inds] if x is not None else None
+        index_agent_list = (
+            lambda xlist: [x[ind] for x, ind in zip(xlist, agent_inds)]
+            if xlist is not None
+            else None
+        )
+        index_neighbors = lambda x: x[others_mask].reshape(
+            [
+                batch_size,
+                num_agents - 1,
+            ]
+            + list(x.shape[2:])
+        )
+
+        return AgentBatch(
+            data_idx=self.data_idx,
+            scene_ts=self.scene_ts,
+            dt=self.dt,
+            agent_name=index_agent_list(self.agent_names),
+            agent_type=index_agent(self.agent_type),
+            curr_agent_state=self.centered_agent_state,  # TODO this is not actually the agent but the `global` coordinate frame
+            agent_hist=index_agent(self.agent_hist),
+            agent_hist_extent=index_agent(self.agent_hist_extent),
+            agent_hist_len=index_agent(self.agent_hist_len),
+            agent_fut=index_agent(self.agent_fut),
+            agent_fut_extent=index_agent(self.agent_fut_extent),
+            agent_fut_len=index_agent(self.agent_fut_len),
+            num_neigh=self.num_agents - 1,
+            neigh_types=index_neighbors(self.agent_type),
+            neigh_hist=index_neighbors(self.agent_hist),
+            neigh_hist_extents=index_neighbors(self.agent_hist_extent),
+            neigh_hist_len=index_neighbors(self.agent_hist_len),
+            neigh_fut=index_neighbors(self.agent_fut),
+            neigh_fut_extents=index_neighbors(self.agent_fut_extent),
+            neigh_fut_len=index_neighbors(self.agent_fut_len),
+            robot_fut=self.robot_fut,
+            robot_fut_len=self.robot_fut_len,
+            map_names=index_agent_list(self.map_names),
+            maps=index_agent(self.maps),
+            vector_maps=index_agent(self.vector_maps),
+            maps_resolution=index_agent(self.maps_resolution),
+            rasters_from_world_tf=index_agent(self.rasters_from_world_tf),
+            agents_from_world_tf=self.centered_agent_from_world_tf,
+            scene_ids=self.scene_ids,
+            history_pad_dir=self.history_pad_dir,
+            extras=self.extras,
         )

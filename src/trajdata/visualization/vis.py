@@ -310,6 +310,7 @@ def plot_agent_batch(
     ax.axis("equal")
 
     # Doing this because the imshow above makes the map origin at the top.
+    # TODO(pkarkus) we should just modify imshow not to change the origin instead.
     ax.invert_yaxis()
 
     if legend:

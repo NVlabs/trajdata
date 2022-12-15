@@ -173,15 +173,11 @@ def main():
     # vec_map.extent is [min_x, min_y, min_z, max_x, max_y, max_z]
     min_x, min_y, _, max_x, max_y, _ = vec_map.extent
 
-    # Adding some heading to the query point.
-    mean_pt_heading: float = np.random.uniform(-np.pi, np.pi)
-
     mean_pt: np.ndarray = np.array(
         [
             np.random.uniform(min_x, max_x),
             np.random.uniform(min_y, max_y),
             0,
-            mean_pt_heading,
         ]
     )
 
@@ -203,12 +199,6 @@ def main():
         mean_pt[None, :2], raster_from_world
     )[0]
     ax.scatter(*query_pt_map, label="Query Point")
-    ax.quiver(
-        [query_pt_map[0]],
-        [query_pt_map[1]],
-        [np.cos(mean_pt_heading)],
-        [np.sin(mean_pt_heading)],
-    )
     vec_map.visualize_lane_graph(
         origin_lane=lane, num_hops=0, raster_from_world=raster_from_world, ax=ax
     )
@@ -221,15 +211,11 @@ def main():
     # vec_map.extent is [min_x, min_y, min_z, max_x, max_y, max_z]
     min_x, min_y, _, max_x, max_y, _ = vec_map.extent
 
-    # Adding some heading to the query point.
-    mean_pt_heading: float = np.random.uniform(-np.pi, np.pi)
-
     mean_pt: np.ndarray = np.array(
         [
             np.random.uniform(min_x, max_x),
             np.random.uniform(min_y, max_y),
             0,
-            mean_pt_heading,
         ]
     )
 
@@ -253,12 +239,6 @@ def main():
         mean_pt[None, :2], raster_from_world
     )[0]
     ax.scatter(*query_pt_map, label="Query Point")
-    ax.quiver(
-        [query_pt_map[0]],
-        [query_pt_map[1]],
-        [np.cos(mean_pt_heading)],
-        [np.sin(mean_pt_heading)],
-    )
     circle2 = plt.Circle(
         (query_pt_map[0], query_pt_map[1]),
         radius * img_resolution,

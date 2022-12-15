@@ -18,7 +18,7 @@ class MapElementKDTree:
     """
     Constructs a KDTree of MapElements and exposes fast lookup functions.
 
-    Inheriting classes need to implement the _extra_points function that defines for a MapElement
+    Inheriting classes need to implement the _extract_points function that defines for a MapElement
     the coordinates we want to store in the KDTree.
     """
 
@@ -106,6 +106,7 @@ class LaneCenterKDTree(MapElementKDTree):
             if self.max_segment_len is not None:
                 pts = pts.interpolate(max_dist=self.max_segment_len)
 
-            return pts.points
+            # We only want to store xyz in the kdtree, not heading.
+            return pts.xyz
         else:
             return None

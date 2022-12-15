@@ -1,5 +1,5 @@
 from enum import IntEnum
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import numpy as np
 import torch
@@ -93,7 +93,9 @@ def vrange(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
     return np.repeat(stops - lens.cumsum(), lens) + np.arange(lens.sum())
 
 
-def angle_wrap(radians: np.ndarray) -> np.ndarray:
+def angle_wrap(
+    radians: Union[np.ndarray, torch.Tensor]
+) -> Union[np.ndarray, torch.Tensor]:
     """This function wraps angles to lie within [-pi, pi).
 
     Args:
@@ -122,7 +124,7 @@ def rotation_matrix(angle: float) -> np.ndarray:
     )
 
 
-def transform_matrices(angles: Tensor, translations: Tensor) -> Tensor:
+def transform_matrices(angles: Tensor, translations: Optional[Tensor]) -> Tensor:
     """Creates a 3x3 transformation matrix for each angle and translation in the input.
 
     Args:
@@ -137,10 +139,17 @@ def transform_matrices(angles: Tensor, translations: Tensor) -> Tensor:
     last_rows = torch.tensor(
         [[0.0, 0.0, 1.0]], dtype=angles.dtype, device=angles.device
     ).expand((angles.shape[0], -1))
+
+    if translations is None:
+        trans_x = torch.zeros_like(angles)
+        trans_y = trans_x
+    else:
+        trans_x, trans_y = torch.unbind(translations, dim=-1)
+
     return torch.stack(
         [
-            torch.stack([cos_vals, -sin_vals, translations[:, 0]], dim=-1),
-            torch.stack([sin_vals, cos_vals, translations[:, 1]], dim=-1),
+            torch.stack([cos_vals, -sin_vals, trans_x], dim=-1),
+            torch.stack([sin_vals, cos_vals, trans_y], dim=-1),
             last_rows,
         ],
         dim=-2,
@@ -164,9 +173,49 @@ def batch_nd_transform_points_np(points: np.ndarray, Mat: np.ndarray) -> np.ndar
         raise Exception("wrong shape")
 
 
+def batch_nd_transform_points_pt(
+    points: torch.Tensor, Mat: torch.Tensor
+) -> torch.Tensor:
+    ndim = Mat.shape[-1] - 1
+    Mat = torch.transpose(Mat, -1, -2)
+    if points.ndim == Mat.ndim - 1:
+        return (points[..., np.newaxis, :] @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
+            ..., -1:, :ndim
+        ].squeeze(-2)
+    elif points.ndim == Mat.ndim:
+        return (
+            (points[..., np.newaxis, :] @ Mat[..., np.newaxis, :ndim, :ndim])
+            + Mat[..., np.newaxis, -1:, :ndim]
+        ).squeeze(-2)
+    elif points.ndim == Mat.ndim + 1:
+        return (
+            (
+                points[..., np.newaxis, :]
+                @ Mat[..., np.newaxis, np.newaxis, :ndim, :ndim]
+            )
+            + Mat[..., np.newaxis, np.newaxis, -1:, :ndim]
+        ).squeeze(-2)
+    else:
+        raise Exception("wrong shape")
+
+
 def batch_nd_transform_angles_np(angles: np.ndarray, Mat: np.ndarray) -> np.ndarray:
     cos_vals, sin_vals = Mat[..., 0, 0], Mat[..., 1, 0]
     rot_angle = np.arctan2(sin_vals, cos_vals)
+    angles = angles + rot_angle
+    angles = angle_wrap(angles)
+    return angles
+
+
+def batch_nd_transform_angles_pt(
+    angles: torch.Tensor, Mat: torch.Tensor
+) -> torch.Tensor:
+    cos_vals, sin_vals = Mat[..., 0, 0], Mat[..., 1, 0]
+    rot_angle = torch.arctan2(sin_vals, cos_vals)
+    if rot_angle.ndim > angles.ndim:
+        raise ValueError("wrong shape")
+    while rot_angle.ndim < angles.ndim:
+        rot_angle = rot_angle.unsqueeze(-1)
     angles = angles + rot_angle
     angles = angle_wrap(angles)
     return angles
@@ -179,6 +228,16 @@ def batch_nd_transform_points_angles_np(
     points = batch_nd_transform_points_np(points_angles[..., :2], Mat)
     angles = batch_nd_transform_angles_np(points_angles[..., 2:3], Mat)
     points_angles = np.concatenate([points, angles], axis=-1)
+    return points_angles
+
+
+def batch_nd_transform_points_angles_pt(
+    points_angles: torch.Tensor, Mat: torch.Tensor
+) -> torch.Tensor:
+    assert points_angles.shape[-1] == 3
+    points = batch_nd_transform_points_pt(points_angles[..., :2], Mat)
+    angles = batch_nd_transform_angles_pt(points_angles[..., 2:3], Mat)
+    points_angles = torch.concat([points, angles], axis=-1)
     return points_angles
 
 

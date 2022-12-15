@@ -87,6 +87,7 @@ class AgentBatchElement:
             agent_info, future_sec
         )
         self.agent_future_len: int = self.agent_future_np.shape[0]
+        self.agent_meta_dict: Dict = get_agent_meta_dict(self.cache, agent_info)
 
         ### NEIGHBOR-SPECIFIC DATA ###
         def distance_limit(agent_types: np.ndarray, target_type: int) -> np.ndarray:
@@ -97,25 +98,26 @@ class AgentBatchElement:
                 ]
             )
 
+        nearby_agents, self.neighbor_types_np = self.get_nearby_agents(
+            scene_time_agent, agent_info, distance_limit
+        )
+
+        self.num_neighbors = len(nearby_agents)
         (
-            self.num_neighbors,
-            self.neighbor_types_np,
             self.neighbor_histories,
             self.neighbor_history_extents,
             self.neighbor_history_lens_np,
-        ) = self.get_neighbor_history(
-            scene_time_agent, agent_info, history_sec, distance_limit
-        )
+        ) = self.get_neighbor_history(history_sec, nearby_agents)
 
         (
-            _,
-            _,
             self.neighbor_futures,
             self.neighbor_future_extents,
             self.neighbor_future_lens_np,
-        ) = self.get_neighbor_future(
-            scene_time_agent, agent_info, future_sec, distance_limit
-        )
+        ) = self.get_neighbor_future(future_sec, nearby_agents)
+
+        self.neighbor_meta_dicts: Dict = [
+            get_agent_meta_dict(self.cache, agent) for agent in nearby_agents
+        ]
 
         ### ROBOT DATA ###
         self.robot_future_np: Optional[np.ndarray] = None
@@ -175,14 +177,12 @@ class AgentBatchElement:
         return agent_future_np, agent_extent_future_np
 
     # @profile
-    def get_neighbor_data(
+    def get_nearby_agents(
         self,
         scene_time: SceneTimeAgent,
         agent_info: AgentMetadata,
-        length_sec: Tuple[Optional[float], Optional[float]],
         distance_limit: Callable[[np.ndarray, int], np.ndarray],
-        mode: str,
-    ) -> Tuple[int, np.ndarray, List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[AgentMetadata], np.ndarray]:
         # The indices of the returned ndarray match the scene_time agents list
         # (including the index of the central agent, which would have a distance
         # of 0 to itself).
@@ -209,51 +209,38 @@ class AgentBatchElement:
                 [a.type.value for a in nearby_agents]
             )
 
-        num_neighbors: int = len(nearby_agents)
+        return nearby_agents, neighbor_types_np
 
-        if mode == "history":
-            (
-                neighbor_data,
-                neighbor_extents_data,
-                neighbor_data_lens_np,
-            ) = self.cache.get_agents_history(self.scene_ts, nearby_agents, length_sec)
-        elif mode == "future":
-            (
-                neighbor_data,
-                neighbor_extents_data,
-                neighbor_data_lens_np,
-            ) = self.cache.get_agents_future(self.scene_ts, nearby_agents, length_sec)
-        else:
-            raise ValueError(f"Unknown mode {mode} passed in!")
-
+    def get_neighbor_history(
+        self,
+        history_sec: Tuple[Optional[float], Optional[float]],
+        nearby_agents: List[AgentMetadata],
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+        (
+            neighbor_data,
+            neighbor_extents_data,
+            neighbor_data_lens_np,
+        ) = self.cache.get_agents_history(self.scene_ts, nearby_agents, history_sec)
         return (
-            num_neighbors,
-            neighbor_types_np,
             neighbor_data,
             neighbor_extents_data,
             neighbor_data_lens_np,
         )
 
-    def get_neighbor_history(
-        self,
-        scene_time: SceneTimeAgent,
-        agent_info: AgentMetadata,
-        history_sec: Tuple[Optional[float], Optional[float]],
-        distance_limit: Callable[[np.ndarray, int], np.ndarray],
-    ) -> Tuple[int, np.ndarray, List[np.ndarray], List[np.ndarray], np.ndarray]:
-        return self.get_neighbor_data(
-            scene_time, agent_info, history_sec, distance_limit, mode="history"
-        )
-
     def get_neighbor_future(
         self,
-        scene_time: SceneTimeAgent,
-        agent_info: AgentMetadata,
         future_sec: Tuple[Optional[float], Optional[float]],
-        distance_limit: Callable[[np.ndarray, int], np.ndarray],
-    ) -> Tuple[int, np.ndarray, List[np.ndarray], List[np.ndarray], np.ndarray]:
-        return self.get_neighbor_data(
-            scene_time, agent_info, future_sec, distance_limit, mode="future"
+        nearby_agents: List[AgentMetadata],
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+        (
+            neighbor_data,
+            neighbor_extents_data,
+            neighbor_data_lens_np,
+        ) = self.cache.get_agents_future(self.scene_ts, nearby_agents, future_sec)
+        return (
+            neighbor_data,
+            neighbor_extents_data,
+            neighbor_data_lens_np,
         )
 
     def get_robot_current_and_future(
@@ -414,6 +401,10 @@ class SceneBatchElement:
             self.agent_future_extents,
             self.agent_future_lens_np,
         ) = self.get_agents_future(future_sec, nearby_agents)
+
+        self.agent_meta_dicts = [
+            get_agent_meta_dict(self.cache, agent) for agent in nearby_agents
+        ]
 
         ### MAP ###
         self.map_name: Optional[str] = None
@@ -623,3 +614,21 @@ class SceneBatchElement:
             (robot_curr_np[np.newaxis, :], robot_fut_np), axis=0
         )
         return robot_curr_and_fut_np
+
+
+def is_agent_stationary(cache: SceneCache, agent_info: AgentMetadata) -> bool:
+    # Agent is considered stationary if it moves less than 1m between the first and last valid timestep.
+    first_state: np.ndarray = cache.get_state(
+        agent_info.name, agent_info.first_timestep
+    )
+    last_state: np.ndarray = cache.get_state(agent_info.name, agent_info.last_timestep)
+    is_stationary = np.square(last_state[:2] - first_state[:2]).sum(0) < 1.0
+    return is_stationary
+
+
+def get_agent_meta_dict(
+    cache: SceneCache, agent_info: AgentMetadata
+) -> Dict[str, np.ndarray]:
+    return {
+        "is_stationary": is_agent_stationary(cache, agent_info),
+    }

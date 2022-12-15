@@ -30,9 +30,9 @@ def get_closest_lane_point(element: AgentBatchElement) -> np.ndarray:
     # Use cached kdtree to find closest lane point
     lane_points_world = []
     for xy_world in agent_future_xy_world:
-        point_4d = np.array([[xy_world[0], xy_world[1], 0.0, 0.0]])
-        closest_lane: RoadLane = vector_map.get_closest_lane(point_4d.squeeze(axis=0))
-        lane_points_world.append(closest_lane.center.project_onto(point_4d))
+        point_xyz = np.array([[xy_world[0], xy_world[1], 0.0]])
+        closest_lane: RoadLane = vector_map.get_closest_lane(point_xyz.squeeze(axis=0))
+        lane_points_world.append(closest_lane.center.project_onto(point_xyz))
 
     lane_points_world = np.concatenate(lane_points_world, axis=0)
 
