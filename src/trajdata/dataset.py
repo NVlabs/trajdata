@@ -414,7 +414,8 @@ class UnifiedDataset(Dataset):
                 # Multiply num_workers by the number of torch processes, because
                 # we will only be using rank 0 process, whereas
                 # num_workers is typically defined per torch process.
-                num_workers = num_workers * distributed.get_world_size()
+                if distributed.is_initialized():
+                    num_workers = num_workers * distributed.get_world_size()
 
                 # Use DataLoader as a generic multiprocessing framework.
                 # We set batchsize=1 and a custom collate function.
@@ -451,7 +452,7 @@ class UnifiedDataset(Dataset):
         # Wait for rank 0 process to be done with caching.
         # Note that the default timeout is 30 minutes. If filtering is expected to exceed this, the timeout can be
         # increased when initializing the process group, i.e., torch.distributed.init_process_group(timeout=...)
-        if distributed.get_world_size() > 1:
+        if distributed.is_initialized() and distributed.get_world_size() > 1:
             gathered_values = all_gather(self._data_index)
             # All proceses use the indices from rank 0
             self._data_index = gathered_values[0]
