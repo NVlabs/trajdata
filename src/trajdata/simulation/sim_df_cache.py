@@ -22,7 +22,8 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
         scene_ts: int,
         augmentations: Optional[List[Augmentation]] = None,
     ) -> None:
-        super().__init__(cache_path, scene, scene_ts, augmentations)
+        super().__init__(cache_path, scene, augmentations)
+        self.scene_ts = scene_ts
 
         agent_names: List[str] = [agent.name for agent in scene.agents]
         in_index: np.ndarray = self.scene_data_df.index.isin(agent_names, level=0)
