@@ -199,15 +199,14 @@ class AgentBatchElement:
         nearby_agents: List[AgentMetadata] = [
             scene_time.agents[idx] for idx in nb_idx if nearby_mask[idx]
         ]
-        neighbor_types_np: np.ndarray = neighbor_types[nearby_mask]
 
         if self.max_neighbor_num is not None:
             # Pruning nearby_agents and re-creating
             # neighbor_types_np with the remaining agents.
             nearby_agents = nearby_agents[: self.max_neighbor_num]
-            neighbor_types_np: np.ndarray = np.array(
-                [a.type.value for a in nearby_agents]
-            )
+
+        # Doing this here because the argsort above changes the order of agents.
+        neighbor_types_np: np.ndarray = np.array([a.type.value for a in nearby_agents])
 
         return nearby_agents, neighbor_types_np
 
