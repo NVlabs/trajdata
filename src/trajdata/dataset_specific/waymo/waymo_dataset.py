@@ -2,25 +2,18 @@ import warnings
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import pandas as pd
-from waymo_open_dataset.protos.map_pb2 import MapFeature
+import tqdm
 
-from trajdata.data_structures.agent import (
-    Agent,
-    AgentMetadata,
-    AgentType,
-    FixedExtent,
-    VariableExtent
-)
-from trajdata.caching import EnvCache, SceneCache
-from trajdata.dataset_specific.raw_dataset import RawDataset
-from waymo_utils import WaymoScenarios, translate_agent_type
 import waymo_utils
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
-from ..scene_records import WaymoSceneRecord
-from trajdata.data_structures.scene_tag import SceneTag
+from waymo_open_dataset.protos.map_pb2 import MapFeature
+from waymo_open_dataset.protos.scenario_pb2 import Scenario
+from waymo_utils import WaymoScenarios, translate_agent_type
+
+from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import (
     AgentMetadata,
     EnvMetadata,
@@ -28,8 +21,16 @@ from trajdata.data_structures import (
     SceneMetadata,
     SceneTag,
 )
-from waymo_open_dataset.protos.scenario_pb2 import Scenario
-
+from trajdata.data_structures.agent import (
+    Agent,
+    AgentMetadata,
+    AgentType,
+    FixedExtent,
+    VariableExtent,
+)
+from trajdata.data_structures.scene_tag import SceneTag
+from trajdata.dataset_specific.raw_dataset import RawDataset
+from trajdata.maps import VectorMap
 from trajdata.proto.vectorized_map_pb2 import (
     MapElement,
     PedCrosswalk,
@@ -37,9 +38,8 @@ from trajdata.proto.vectorized_map_pb2 import (
     VectorizedMap,
 )
 
-from ...utils import arr_utils
-from trajdata.maps import VectorMap
-
+from trajdata.utils import arr_utils
+from trajdata.dataset_specific.scene_records import WaymoSceneRecord
 
 
 def const_lambda(const_val: Any) -> Any:
@@ -47,30 +47,29 @@ def const_lambda(const_val: Any) -> Any:
 
 def get_mode_val(series: pd.Series) -> float:
     return series.mode().iloc[0].item()
+
+
 class WaymoDataset(RawDataset):
     def compute_metadata(self, env_name: str, data_dir: str) -> EnvMetadata:
         if env_name == "waymo_train":
 
-            # nuScenes possibilities are the Cartesian product of these
+            # Waymo possibilities are the Cartesian product of these
             dataset_parts = [
-                ("train"),
-                ("san francisco", "mountain view", "los angeles", "detroit", "seattle", "phoenix")
+                ("train")
             ]
             scene_split_map = defaultdict(partial(const_lambda, const_val="train"))
         elif env_name == "waymo_val":
 
-            # nuScenes possibilities are the Cartesian product of these
+            # Waymo possibilities are the Cartesian product of these
             dataset_parts = [
-                ("val"),
-                ("san francisco", "mountain view", "los angeles", "detroit", "seattle", "phoenix"),
+                ("val")
             ]
             scene_split_map = defaultdict(partial(const_lambda, const_val="val"))
         elif env_name == "waymo_test":
 
-            # nuScenes possibilities are the Cartesian product of these
+            # Waymo possibilities are the Cartesian product of these
             dataset_parts = [
-                ("test"),
-                ("san francisco", "mountain view", "los angeles", "detroit", "seattle", "phoenix"),
+                ("test")
             ]
             scene_split_map = defaultdict(partial(const_lambda, const_val="test"))
         return EnvMetadata(name=env_name,
@@ -128,7 +127,7 @@ class WaymoDataset(RawDataset):
         return Scene(
             self.metadata,
             scene_name,
-            '',
+            'unknown',
             scene_split,
             scene_length,
             data_idx,
@@ -157,7 +156,7 @@ class WaymoDataset(RawDataset):
                 scene_metadata = Scene(
                     self.metadata,
                     scene_name,
-                    "",
+                    "unknown",
                     scene_split,
                     scene_length,
                     data_idx,
@@ -194,11 +193,11 @@ class WaymoDataset(RawDataset):
                 continue
             agent_ml_class.append(agent_type)
             states = track.states
-            translations = [[state.center_x, state.center_y, state.center_z] for state in states]
+            translations = [(state.center_x, state.center_y, state.center_z) for state in states]
             agent_translations.extend(translations)
-            velocities = [[state.velocity_x, state.velocity_y] for state in states]
+            velocities = [(state.velocity_x, state.velocity_y) for state in states]
             agent_velocities.extend(velocities)
-            sizes = [[state.length, state.width, state.height] for state in states]
+            sizes = [(state.length, state.width, state.height) for state in states]
             agent_sizes.extend(sizes)
             yaws = [state.heading for state in states]
             agent_yaws.extend(yaws)
@@ -289,7 +288,7 @@ class WaymoDataset(RawDataset):
         all_agent_data_df.set_index(["agent_id", "scene_ts"], inplace=True)
 
         cache_class.save_agent_data(
-            pd.concat([all_agent_data_df.loc[:, final_cols]]),
+            all_agent_data_df.loc[:, final_cols],
             cache_path,
             scene,
         )
@@ -318,5 +317,5 @@ class WaymoDataset(RawDataset):
             map_cache_class: Type[SceneCache],
             map_params: Dict[str, Any],
     ) -> None:
-        for i in range(len(self.dataset_obj.scenarios)):
+        for i in tqdm.trange(len(self.dataset_obj.scenarios)):
             self.cache_map(i, cache_path, map_cache_class, map_params)

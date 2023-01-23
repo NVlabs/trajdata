@@ -1,18 +1,18 @@
+import copy
 import pathlib
-from typing import List, Final, Tuple, Dict
 import time
+from multiprocessing import Pool
+from typing import Dict, Final, List, Tuple
+
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import copy
-from multiprocessing import Pool
-
 from tqdm import tqdm
-from waymo_open_dataset.protos import scenario_pb2, map_pb2 as waymo_map_pb2
+from waymo_open_dataset.protos import map_pb2 as waymo_map_pb2
+from waymo_open_dataset.protos import scenario_pb2
 
 from trajdata.maps import TrafficLightStatus
 from trajdata.proto import vectorized_map_pb2
-
 
 WAYMO_DT: Final[float] = 0.1
 SOURCE_DIR = "../../../../../scenarios"
@@ -26,8 +26,10 @@ from trajdata.data_structures.agent import (
     Agent,
     AgentMetadata,
     AgentType,
-    FixedExtent, VariableExtent
+    FixedExtent,
+    VariableExtent,
 )
+
 
 def parse_data(data):
     scenario = scenario_pb2.Scenario()
@@ -103,21 +105,21 @@ def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -
 def translate_agent_type(agent_type):
     if agent_type == scenario_pb2.Track.ObjectType.TYPE_VEHICLE:
         return AgentType.VEHICLE
-    if agent_type == scenario_pb2.Track.ObjectType.TYPE_PEDESTRIAN:
+    elif agent_type == scenario_pb2.Track.ObjectType.TYPE_PEDESTRIAN:
         return AgentType.PEDESTRIAN
-    if agent_type == scenario_pb2.Track.ObjectType.TYPE_CYCLIST:
+    elif agent_type == scenario_pb2.Track.ObjectType.TYPE_CYCLIST:
         return AgentType.BICYCLE
-    if agent_type == scenario_pb2.Track.ObjectType.OTHER:
+    elif agent_type == scenario_pb2.Track.ObjectType.OTHER:
         return AgentType.UNKNOWN
     return -1
 
 def get_larger_elems(list1, list2):
-    if list1 != list2:
+    if len(list1) != len(list2):
         return -1
     return [np.max([list1[i], list2[i]]) for i in range(len(list1))]
 
 def get_smaller_elems(list1, list2):
-    if list1 != list2:
+    if len(list1) != len(list2):
         return -1
     return [np.min([list1[i], list2[i]]) for i in range(len(list1))]
 
@@ -135,7 +137,8 @@ def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> (vectorized_m
 
 
 def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLane, List[int, int, int], List[int, int, int]):
-    ret = vectorized_map_pb2.RoadLane
+    road_lane = vectorized_map_pb2.RoadLane
+    # road_area = vectorized_map_pb2.RoadArea
     # Waymo lane only gives boundary indices and no center indices
     indices = [lane.left_boundaries.lane_start_index,
                lane.left_bounaries.lane_end_index,
@@ -147,17 +150,17 @@ def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLa
     right_boundary: List[waymo_map_pb2.MapPoint] = \
         lane.polyline[lane.right_boundaries.lane_start_index:lane.right_bounaries.lane_end_index]
     center = lane.polyline[:indices[0]] + lane.polyline[indices[1]:indices[2]] + lane.polyline[indices[3]:]
-    ret.center, center_max, center_min = translate_poly_line(center)
-    ret.left_boundary, left_max, left_min = translate_poly_line(left_boundary)
-    ret.right_boundary, right_max, right_min = translate_poly_line(right_boundary)
+    road_lane.center, center_max, center_min = translate_poly_line(center)
+    road_lane.left_boundary, left_max, left_min = translate_poly_line(left_boundary)
+    road_lane.right_boundary, right_max, right_min = translate_poly_line(right_boundary)
 
-    ret.entry_lanes[:] = lane.entry_lanes
-    ret.exit_lanes[:] = lane.exit_lanes
-    ret.adjacent_lanes_left[:] = [neighbor.feature_id for neighbor in lane.left_neighbors]
-    ret.adjacent_lanes_right[:] = [neighbor.feature_id for neighbor in lane.right_neighbors]
+    road_lane.entry_lanes.extent(lane.entry_lanes)
+    road_lane.exit_lanes.extent(lane.exit_lanes)
+    road_lane.adjacent_lanes_left.extent([neighbor.feature_id for neighbor in lane.left_neighbors])
+    road_lane.adjacent_lanes_right.extent([neighbor.feature_id for neighbor in lane.right_neighbors])
     max_point = [ np.max([center_max[i], left_max[i], right_max[i]]) for i in range(3)]
     min_point = [ np.min([center_min[i], left_min[i], right_min[i]]) for i in range(3)]
-    return ret, max_point, min_point
+    return road_lane, max_point, min_point
 
 
 def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> (vectorized_map_pb2.PedCrosswalk, List[int, int, int], List[int, int, int]):
