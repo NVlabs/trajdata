@@ -15,7 +15,6 @@ from trajdata.maps import TrafficLightStatus
 from trajdata.proto import vectorized_map_pb2
 
 WAYMO_DT: Final[float] = 0.1
-SOURCE_DIR = "../../../../../scenarios"
 WAYMO_DATASET_NAMES = ["testing",
                  "testing_interactive",
                  "training",
@@ -36,7 +35,7 @@ def parse_data(data):
     scenario.ParseFromString(data)
     return scenario
 class WaymoScenarios:
-    def __init__(self, dataset_name, source_dir=SOURCE_DIR, load=True, num_parallel_reads=None):
+    def __init__(self, dataset_name, source_dir, load=True, num_parallel_reads=None):
         if dataset_name not in WAYMO_DATASET_NAMES:
             raise RuntimeError('Wrong dataset name. Please choose name from '+str(WAYMO_DATASET_NAMES))
         self.name = dataset_name
@@ -65,8 +64,6 @@ class WaymoScenarios:
         if verbose:
             print(str(len(self.scenarios)) + " scenarios from " + str(len(file_names)) + " file(s) have been loaded successfully")
 
-
-# way = WaymoScenarios(dataset_name='haha')
 
 def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
     vec_map = vectorized_map_pb2.VectorizedMap()
@@ -194,134 +191,3 @@ def translate_traffic_state(state: waymo_map_pb2.TrafficSignalLaneState.State) -
     if state in red:
         return TrafficLightStatus.RED
     return TrafficLightStatus.UNKNOWN
-
-# agent_list: List[AgentMetadata] = []
-# agent_presence: List[List[AgentMetadata]] = [
-#     [] for _ in range(91)
-# ]
-# scenario = load_tfrecords(data_dir + '/training', False)[0]
-# agent_ids = []
-# agent_translations = []
-# agent_velocities = []
-# agent_yaws = []
-# agent_ml_class = []
-# agent_sizes = []
-#
-# for index, track in enumerate(scenario.tracks):
-#     agent_name = track.id
-#     if index == scenario.sdc_track_index:
-#         agent_name = "ego"
-#
-#     agent_ids.append(agent_name)
-#
-#     agent_type: AgentType = translate_agent_type(track.object_type)
-#     agent_ml_class.append(agent_type)
-#     states = track.states
-#     translations = [[state.center_x, state.center_y, state.center_z] for state in states]
-#     agent_translations.extend(translations)
-#     velocities = [[state.velocity_x, state.velocity_y] for state in states]
-#     agent_velocities.extend(velocities)
-#     sizes = [[state.length, state.width, state.height] for state in states]
-#     agent_sizes.extend(sizes)
-#     yaws = [state.heading for state in states]
-#     agent_yaws.extend(yaws)
-#
-#     first_timestep = 0
-#     states = track.states
-#     for timestep in range(91):
-#         if states[timestep].valid:
-#             first_timestep = timestep
-#             break
-#     last_timestep = 90
-#     for timestep in range(91):
-#         if states[90 - timestep].valid:
-#             last_timestep = timestep
-#             break
-#
-#     agent_info = AgentMetadata(
-#         name=agent_name,
-#         agent_type=agent_type,
-#         first_timestep=first_timestep,
-#         last_timestep=last_timestep,
-#         extent=VariableExtent(),
-#     )
-#     if last_timestep - first_timestep != 0:
-#         agent_list.append(agent_info)
-#
-#     for timestep in range(first_timestep, last_timestep + 1):
-#         agent_presence[timestep].append(agent_info)
-#
-# agent_ids = np.repeat(agent_ids, 91)
-#
-# agent_translations = np.array(agent_translations)
-# agent_velocities = np.array(agent_velocities)
-# agent_sizes = np.array(agent_sizes)
-#
-# agent_ml_class = np.repeat(agent_ml_class, 91)
-# agent_yaws = np.array(agent_yaws)
-#
-# print(agent_ids.shape)
-# print(agent_translations.shape)
-# print(agent_velocities.shape)
-# print(agent_sizes.shape)
-# print(agent_ml_class.shape)
-# print(agent_yaws.shape)
-#
-# all_agent_data = np.concatenate(
-#     [
-#         agent_translations,
-#         agent_velocities,
-#         np.expand_dims(agent_yaws, axis=1),
-#         np.expand_dims(agent_ml_class, axis=1),
-#         agent_sizes,
-#     ],
-#     axis=1,
-# )
-#
-# traj_cols = ["x", "y", "z", "vx", "vy", "heading"]
-# class_cols = ["class_id"]
-# extent_cols = ["length", "width", "height"]
-# agent_frame_ids = np.resize(
-#     np.arange(91), 63*91
-# )
-#
-# all_agent_data_df = pd.DataFrame(
-#     all_agent_data,
-#     columns=traj_cols + class_cols + extent_cols,
-#     index=[agent_ids, agent_frame_ids],
-# )
-#
-# all_agent_data_df.index.names = ["agent_id", "scene_ts"]
-# all_agent_data_df.sort_index(inplace=True)
-# all_agent_data_df.reset_index(level=1, inplace=True)
-#
-# all_agent_data_df[["ax", "ay"]] = (
-#         arr_utils.agent_aware_diff(
-#             all_agent_data_df[["vx", "vy"]].to_numpy(), agent_ids
-#         )
-#         / WAYMO_DT
-# )
-# final_cols = [
-#                  "x",
-#                  "y",
-#                  "vx",
-#                  "vy",
-#                  "ax",
-#                  "ay",
-#                  "heading",
-#              ] + extent_cols
-# all_agent_data_df.reset_index(inplace=True)
-# all_agent_data_df["agent_id"] = all_agent_data_df["agent_id"].astype(str)
-# all_agent_data_df.set_index(["agent_id", "scene_ts"], inplace=True)
-#
-# print(all_agent_data_df)
-# print(all_agent_data_df.columns)
-# print(all_agent_data_df.loc[:, final_cols])
-# print(pd.concat([all_agent_data_df.loc[:, final_cols]]))
-# print(scenario.tracks[0].id)
-# print(scenario.tracks[0].states[1].height)
-
-# for track in scenario.tracks:
-#
-#     print(all_agent_data_df['height'][str(track.id)][0])
-#     break

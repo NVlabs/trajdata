@@ -193,14 +193,10 @@ class WaymoDataset(RawDataset):
                 continue
             agent_ml_class.append(agent_type)
             states = track.states
-            translations = [(state.center_x, state.center_y, state.center_z) for state in states]
-            agent_translations.extend(translations)
-            velocities = [(state.velocity_x, state.velocity_y) for state in states]
-            agent_velocities.extend(velocities)
+            translations = np.array([(state.center_x, state.center_y, state.center_z) for state in states], dtype=np.float)
+            velocities = np.array([(state.velocity_x, state.velocity_y) for state in states], dtype=np.float)
             sizes = [(state.length, state.width, state.height) for state in states]
-            agent_sizes.extend(sizes)
             yaws = [state.heading for state in states]
-            agent_yaws.extend(yaws)
 
             first_timestep = 0
             states = track.states
@@ -213,6 +209,12 @@ class WaymoDataset(RawDataset):
                 if states[scene.length_timesteps - timestep - 1].valid:
                     last_timestep = timestep
                     break
+            translations[first_timestep:last_timestep] = pd.Series(translations[first_timestep:last_timestep]).interpolate().to_numpy()
+            agent_translations.extend(translations)
+            velocities[first_timestep:last_timestep] = pd.Series(velocities[first_timestep:last_timestep]).interpolate().to_numpy()
+            agent_velocities.extend(velocities)
+            agent_sizes.extend(sizes)
+            agent_yaws.extend(yaws)
 
             agent_info = AgentMetadata(
                 name=agent_name,
