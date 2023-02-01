@@ -62,7 +62,7 @@ def agg_agent_data(
     if agent_data["prev"]:
         print("WARN: This is not the first frame of this agent!")
 
-    translation_list = [np.array(agent_data["translation"][:2])[np.newaxis]]
+    translation_list = [np.array(agent_data["translation"][:3])[np.newaxis]]
     agent_size = agent_data["size"]
     yaw_list = [Quaternion(agent_data["rotation"]).yaw_pitch_roll[0]]
 
@@ -71,7 +71,7 @@ def agg_agent_data(
     while curr_sample_ann_token:
         agent_data = nusc_obj.get("sample_annotation", curr_sample_ann_token)
 
-        translation = np.array(agent_data["translation"][:2])
+        translation = np.array(agent_data["translation"][:3])
         heading = Quaternion(agent_data["rotation"]).yaw_pitch_roll[0]
         curr_idx: int = frame_idx_dict[agent_data["sample_token"]]
         if curr_idx > prev_idx + 1:
@@ -85,6 +85,11 @@ def agg_agent_data(
                 x=fill_time,
                 xp=[prev_idx, curr_idx],
                 fp=[translation_list[-1][0, 1], translation[1]],
+            )
+            zs = np.interp(
+                x=fill_time,
+                xp=[prev_idx, curr_idx],
+                fp=[translation_list[-1][0, 2], translation[2]],
             )
             headings: np.ndarray = arr_utils.angle_wrap(
                 np.interp(
@@ -106,9 +111,13 @@ def agg_agent_data(
     translations_np = np.concatenate(translation_list, axis=0)
 
     # Doing this prepending so that the first velocity isn't zero (rather it's just the first actual velocity duplicated)
-    prepend_pos = translations_np[0] - (translations_np[1] - translations_np[0])
+    prepend_pos = translations_np[0, :2] - (
+        translations_np[1, :2] - translations_np[0, :2]
+    )
     velocities_np = (
-        np.diff(translations_np, axis=0, prepend=np.expand_dims(prepend_pos, axis=0))
+        np.diff(
+            translations_np[:, :2], axis=0, prepend=np.expand_dims(prepend_pos, axis=0)
+        )
         / NUSC_DT
     )
 
@@ -155,7 +164,7 @@ def agg_agent_data(
     last_timestep = curr_scene_index + agent_data_np.shape[0] - 1
     agent_data_df = pd.DataFrame(
         agent_data_np,
-        columns=["x", "y", "vx", "vy", "ax", "ay", "heading"],
+        columns=["x", "y", "z", "vx", "vy", "ax", "ay", "heading"],
         index=pd.MultiIndex.from_tuples(
             [
                 (agent_data["instance_token"], idx)
@@ -200,16 +209,18 @@ def agg_ego_data(nusc_obj: NuScenes, scene: Scene) -> Agent:
     for frame_info in frame_iterator(nusc_obj, scene):
         ego_pose = get_ego_pose(nusc_obj, frame_info)
         yaw_list.append(Quaternion(ego_pose["rotation"]).yaw_pitch_roll[0])
-        translation_list.append(ego_pose["translation"][:2])
+        translation_list.append(ego_pose["translation"])
 
     translations_np: np.ndarray = np.stack(translation_list, axis=0)
 
     # Doing this prepending so that the first velocity isn't zero (rather it's just the first actual velocity duplicated)
-    prepend_pos: np.ndarray = translations_np[0] - (
-        translations_np[1] - translations_np[0]
+    prepend_pos: np.ndarray = translations_np[0, :2] - (
+        translations_np[1, :2] - translations_np[0, :2]
     )
     velocities_np: np.ndarray = (
-        np.diff(translations_np, axis=0, prepend=np.expand_dims(prepend_pos, axis=0))
+        np.diff(
+            translations_np[:, :2], axis=0, prepend=np.expand_dims(prepend_pos, axis=0)
+        )
         / NUSC_DT
     )
 
@@ -228,7 +239,7 @@ def agg_ego_data(nusc_obj: NuScenes, scene: Scene) -> Agent:
     )
     ego_data_df = pd.DataFrame(
         ego_data_np,
-        columns=["x", "y", "vx", "vy", "ax", "ay", "heading"],
+        columns=["x", "y", "z", "vx", "vy", "ax", "ay", "heading"],
         index=pd.MultiIndex.from_tuples(
             [("ego", idx) for idx in range(ego_data_np.shape[0])],
             names=["agent_id", "scene_ts"],

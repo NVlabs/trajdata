@@ -1,5 +1,5 @@
 from enum import IntEnum
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -93,9 +93,7 @@ def vrange(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
     return np.repeat(stops - lens.cumsum(), lens) + np.arange(lens.sum())
 
 
-def angle_wrap(
-    radians: Union[np.ndarray, torch.Tensor]
-) -> Union[np.ndarray, torch.Tensor]:
+def angle_wrap(radians: np.ndarray) -> np.ndarray:
     """This function wraps angles to lie within [-pi, pi).
 
     Args:
@@ -107,28 +105,36 @@ def angle_wrap(
     return (radians + np.pi) % (2 * np.pi) - np.pi
 
 
-def rotation_matrix(angle: float) -> np.ndarray:
-    """Creates a 2D rotation matrix.
+def rotation_matrix(angle: Union[float, np.ndarray]) -> np.ndarray:
+    """Creates one or many 2D rotation matrices.
 
     Args:
-        angle (float): The angle to rotate points by.
+        angle (Union[float, np.ndarray]): The angle to rotate points by.
+            if float, returns 2x2 matrix
+            if np.ndarray, expects shape [...], and returns [...,2,2] array
 
     Returns:
-        np.ndarray: The 2x2 rotation matrix.
+        np.ndarray: The 2x2 rotation matri(x/ces).
     """
-    return np.array(
+    batch_dims = 0
+    if isinstance(angle, np.ndarray):
+        batch_dims = angle.ndim
+        angle = angle
+
+    rotmat: np.ndarray = np.array(
         [
             [np.cos(angle), -np.sin(angle)],
             [np.sin(angle), np.cos(angle)],
         ]
     )
+    return rotmat.transpose(*np.arange(2, batch_dims + 2), 0, 1)
 
 
-def transform_matrices(angles: Tensor, translations: Optional[Tensor]) -> Tensor:
+def transform_matrices(angles: Tensor, translations: Tensor) -> Tensor:
     """Creates a 3x3 transformation matrix for each angle and translation in the input.
 
     Args:
-        angles (Tensor): The (N,)-shaped angles tensor to rotate points by.
+        angles (Tensor): The (N,)-shaped angles tensor to rotate points by (in radians).
         translations (Tensor): The (N,2)-shaped translations to shift points by.
 
     Returns:
@@ -139,106 +145,103 @@ def transform_matrices(angles: Tensor, translations: Optional[Tensor]) -> Tensor
     last_rows = torch.tensor(
         [[0.0, 0.0, 1.0]], dtype=angles.dtype, device=angles.device
     ).expand((angles.shape[0], -1))
-
-    if translations is None:
-        trans_x = torch.zeros_like(angles)
-        trans_y = trans_x
-    else:
-        trans_x, trans_y = torch.unbind(translations, dim=-1)
-
     return torch.stack(
         [
-            torch.stack([cos_vals, -sin_vals, trans_x], dim=-1),
-            torch.stack([sin_vals, cos_vals, trans_y], dim=-1),
+            torch.stack([cos_vals, -sin_vals, translations[:, 0]], dim=-1),
+            torch.stack([sin_vals, cos_vals, translations[:, 1]], dim=-1),
             last_rows,
         ],
         dim=-2,
     )
 
 
-def batch_nd_transform_points_np(points: np.ndarray, Mat: np.ndarray) -> np.ndarray:
-    ndim = Mat.shape[-1] - 1
-    batch = list(range(Mat.ndim - 2)) + [Mat.ndim - 1] + [Mat.ndim - 2]
-    Mat = np.transpose(Mat, batch)
-    if points.ndim == Mat.ndim - 1:
-        return (points[..., np.newaxis, :] @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
-            ..., -1:, :ndim
-        ].squeeze(-2)
-    elif points.ndim == Mat.ndim:
-        return (
-            (points[..., np.newaxis, :] @ Mat[..., np.newaxis, :ndim, :ndim])
-            + Mat[..., np.newaxis, -1:, :ndim]
-        ).squeeze(-2)
-    else:
-        raise Exception("wrong shape")
-
-
-def batch_nd_transform_points_pt(
-    points: torch.Tensor, Mat: torch.Tensor
-) -> torch.Tensor:
-    ndim = Mat.shape[-1] - 1
-    Mat = torch.transpose(Mat, -1, -2)
-    if points.ndim == Mat.ndim - 1:
-        return (points[..., np.newaxis, :] @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
-            ..., -1:, :ndim
-        ].squeeze(-2)
-    elif points.ndim == Mat.ndim:
-        return (
-            (points[..., np.newaxis, :] @ Mat[..., np.newaxis, :ndim, :ndim])
-            + Mat[..., np.newaxis, -1:, :ndim]
-        ).squeeze(-2)
-    elif points.ndim == Mat.ndim + 1:
-        return (
-            (
-                points[..., np.newaxis, :]
-                @ Mat[..., np.newaxis, np.newaxis, :ndim, :ndim]
-            )
-            + Mat[..., np.newaxis, np.newaxis, -1:, :ndim]
-        ).squeeze(-2)
-    else:
-        raise Exception("wrong shape")
-
-
-def batch_nd_transform_angles_np(angles: np.ndarray, Mat: np.ndarray) -> np.ndarray:
-    cos_vals, sin_vals = Mat[..., 0, 0], Mat[..., 1, 0]
-    rot_angle = np.arctan2(sin_vals, cos_vals)
-    angles = angles + rot_angle
-    angles = angle_wrap(angles)
-    return angles
-
-
-def batch_nd_transform_angles_pt(
-    angles: torch.Tensor, Mat: torch.Tensor
-) -> torch.Tensor:
-    cos_vals, sin_vals = Mat[..., 0, 0], Mat[..., 1, 0]
-    rot_angle = torch.arctan2(sin_vals, cos_vals)
-    if rot_angle.ndim > angles.ndim:
-        raise ValueError("wrong shape")
-    while rot_angle.ndim < angles.ndim:
-        rot_angle = rot_angle.unsqueeze(-1)
-    angles = angles + rot_angle
-    angles = angle_wrap(angles)
-    return angles
-
-
-def batch_nd_transform_points_angles_np(
-    points_angles: np.ndarray, Mat: np.ndarray
+def transform_coords_2d_np(
+    coords: np.ndarray,
+    offset: Optional[np.ndarray] = None,
+    angle: Optional[np.ndarray] = None,
+    rot_mat: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    assert points_angles.shape[-1] == 3
-    points = batch_nd_transform_points_np(points_angles[..., :2], Mat)
-    angles = batch_nd_transform_angles_np(points_angles[..., 2:3], Mat)
-    points_angles = np.concatenate([points, angles], axis=-1)
-    return points_angles
+    """
+    Args:
+        coords (np.ndarray): [..., 2] coordinates
+        offset (Optional[np.ndarray], optional): [..., 2] offset to transalte. Defaults to None.
+        angle (Optional[np.ndarray], optional): [...] angle to rotate by. Defaults to None.
+        rot_mat (Optional[np.ndarray], optional): [..., 2,2] rotation matrix to apply. Defaults to None.
+            If rot_mat is given, angle is ignored.
+
+    Returns:
+        np.ndarray: transformed coords
+    """
+    if offset is not None:
+        coords = coords + offset
+
+    if rot_mat is None and angle is not None:
+        rot_mat = rotation_matrix(angle)
+
+    if rot_mat is not None:
+        coords = np.einsum("...ij,...j->...i", rot_mat, coords)
+
+    return coords
 
 
-def batch_nd_transform_points_angles_pt(
-    points_angles: torch.Tensor, Mat: torch.Tensor
-) -> torch.Tensor:
-    assert points_angles.shape[-1] == 3
-    points = batch_nd_transform_points_pt(points_angles[..., :2], Mat)
-    angles = batch_nd_transform_angles_pt(points_angles[..., 2:3], Mat)
-    points_angles = torch.concat([points, angles], axis=-1)
-    return points_angles
+def transform_coords_np(
+    coords: np.ndarray, tf_mat: np.ndarray, translate: bool = True
+) -> np.ndarray:
+    """
+    Returns coords after transforming them according to the transformation matrix tf_mat
+
+    Args:
+        coords (np.ndarray): batch of points [..., d]
+        tf_mat (np.ndarray): nd affine transformation matrix [..., d+1, d+1]
+            or [d+1, d+1] if the same transformation should be applied to all points
+
+    Returns:
+        np.ndarray: transformed points [..., d]
+    """
+    if coords.ndim == (tf_mat.ndim - 1):
+        transformed = np.einsum("...jk,...k->...j", tf_mat[..., :-1, :-1], coords)
+        if translate:
+            transformed += tf_mat[..., :-1, -1]
+    elif tf_mat.ndim == 2:
+        transformed = np.einsum("jk,...k->...j", tf_mat[:-1, :-1], coords)
+        if translate:
+            transformed += tf_mat[None, :-1, -1]
+    else:
+        raise ValueError("Batch dims of tf_mat must match coords")
+
+    return transformed
+
+
+def transform_angles_np(angles: np.ndarray, tf_mat: np.ndarray) -> np.ndarray:
+    """
+    Returns angles after transforming them according to the transformation matrix tf_mat
+
+    Args:
+        angles (np.ndarray): batch of angles [...]
+        tf_mat (np.ndarray): nd affine transformation matrix [..., d+1, d+1]
+            or [d+1, d+1] if the same transformation should be applied to all points
+
+    Returns:
+        np.ndarray: transformed angles [...]
+    """
+    cos_vals, sin_vals = tf_mat[..., 0, 0], tf_mat[..., 1, 0]
+    rot_angle = np.arctan2(sin_vals, cos_vals)
+    transformed_angles = angles + rot_angle
+    transformed_angles = angle_wrap(transformed_angles)
+    return transformed_angles
+
+
+def transform_xyh_np(xyh: np.ndarray, tf_mat: np.ndarray) -> np.ndarray:
+    """
+    Returns transformed set of xyh points
+
+    Args:
+        xyh (np.ndarray): shape [...,3]
+        tf_mat (np.ndarray): shape [...,3,3]
+    """
+    transformed_xy = transform_coords_np(xyh[..., :2], tf_mat)
+    transformed_angles = transform_angles_np(xyh[..., 3], tf_mat)
+    return np.concatenate([transformed_xy, transformed_angles[..., None]], axis=-1)
 
 
 def agent_aware_diff(values: np.ndarray, agent_ids: np.ndarray) -> np.ndarray:

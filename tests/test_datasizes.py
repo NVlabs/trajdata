@@ -174,6 +174,64 @@ class TestDatasetSizes(unittest.TestCase):
 
         self.assertEqual(len(dataset), 943)
 
+    def test_hist_fut_len(self):
+        dataset = UnifiedDataset(
+            desired_data=["nusc_mini-mini_train"],
+            centric="agent",
+            desired_dt=0.1,
+            history_sec=(2.3, 2.3),
+            future_sec=(2.4, 2.4),
+            only_types=[AgentType.VEHICLE],
+            max_agent_num=20,
+            num_workers=0,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "nusc_mini": "~/datasets/nuScenes",
+            },
+        )
+
+        self.assertEqual(dataset[0].agent_history_np.shape[0], 24)
+        self.assertEqual(dataset[0].agent_future_np.shape[0], 24)
+        self.assertEqual(dataset[0].scene_ts, 23)
+
+        dataset = UnifiedDataset(
+            desired_data=["nusc_mini-mini_train"],
+            centric="agent",
+            desired_dt=0.1,
+            history_sec=(3.2, 3.2),
+            future_sec=(4.8, 4.8),
+            only_types=[AgentType.VEHICLE],
+            max_agent_num=20,
+            num_workers=0,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "nusc_mini": "~/datasets/nuScenes",
+            },
+        )
+
+        self.assertEqual(dataset[0].agent_history_np.shape[0], 33)
+        self.assertEqual(dataset[0].agent_future_np.shape[0], 48)
+        self.assertEqual(dataset[0].scene_ts, 32)
+
+        dataset = UnifiedDataset(
+            desired_data=["nusc_mini-mini_train"],
+            centric="scene",
+            desired_dt=0.1,
+            history_sec=(2.3, 2.3),
+            future_sec=(2.4, 2.4),
+            only_types=[AgentType.VEHICLE],
+            max_agent_num=20,
+            num_workers=0,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "nusc_mini": "~/datasets/nuScenes",
+            },
+        )
+
+        self.assertEqual(dataset[0].agent_histories[0].shape[0], 24)
+        self.assertEqual(dataset[0].agent_futures[0].shape[0], 24)
+        self.assertEqual(dataset[0].scene_ts, 23)
+
 
 if __name__ == "__main__":
     unittest.main()

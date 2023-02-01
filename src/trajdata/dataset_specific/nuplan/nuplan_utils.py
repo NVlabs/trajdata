@@ -127,6 +127,7 @@ class NuPlanObject:
         SELECT  lpc.token AS lpc_token,
                 ep.x AS ego_x,
                 ep.y AS ego_y,
+                ep.z AS ego_z,
                 ep.qw AS ego_qw,
                 ep.qx AS ego_qx,
                 ep.qy AS ego_qy,
@@ -157,6 +158,7 @@ class NuPlanObject:
                 tr.height,
                 lb.x,
                 lb.y,
+                lb.z,
                 lb.vx,
                 lb.vy,
                 lb.yaw

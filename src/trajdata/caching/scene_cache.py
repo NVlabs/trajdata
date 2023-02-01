@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Type
 
 if TYPE_CHECKING:
     from trajdata.maps import TrafficLightStatus, VectorMap
 
-
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
 from trajdata.augmentation.augmentation import Augmentation
 from trajdata.data_structures.agent import AgentMetadata
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray
 
 
 class SceneCache:
@@ -36,6 +36,8 @@ class SceneCache:
             self.path, self.scene.env_name, self.scene.name
         )
         self.scene_dir.mkdir(parents=True, exist_ok=True)
+
+        self.obs_type: Type[StateArray] = None
 
     @staticmethod
     def scene_cache_dir(cache_path: Path, env_name: str, scene_name: str) -> Path:
@@ -64,35 +66,45 @@ class SceneCache:
         """
         raise NotImplementedError()
 
-    def get_raw_state(self, agent_id: str, scene_ts: int) -> np.ndarray:
+    def get_raw_state(self, agent_id: str, scene_ts: int) -> StateArray:
         """
         Get an agent's raw state (without transformations applied)
         """
         raise NotImplementedError()
 
-    def get_state(self, agent_id: str, scene_ts: int) -> np.ndarray:
+    def get_state(self, agent_id: str, scene_ts: int) -> StateArray:
         """
         Get an agent's state at a specific timestep.
         """
         raise NotImplementedError()
 
-    def get_states(self, agent_ids: List[str], scene_ts: int) -> np.ndarray:
+    def get_states(self, agent_ids: List[str], scene_ts: int) -> StateArray:
         """
         Get multiple agents' states at a specific timestep.
         """
         raise NotImplementedError()
 
-    def transform_data(self, **kwargs) -> None:
+    def set_obs_frame(self, obs_frame: StateArray) -> None:
         """
-        Transform the data before accessing it later, e.g., to make the mean zero or rotate the scene around an agent.
-        This can either be done in this function call or just stored for later lazy application.
+        Set frame in which to return observations
         """
         raise NotImplementedError()
 
-    def reset_transforms(self) -> None:
+    def reset_obs_frame(self) -> None:
         """
-        Transform the data back to its original coordinate system.
-        This can either be done in this function call or just stored for later lazy application.
+        Reset observation frame to be same as world frame
+        """
+        raise NotImplementedError()
+
+    def set_obs_format(self, format_str: str) -> None:
+        """
+        Sets observation format (which elements to include and their order)
+        """
+        raise NotImplementedError()
+
+    def reset_obs_format(self) -> None:
+        """
+        Resets observation format to default (set by subclass)
         """
         raise NotImplementedError()
 
@@ -110,7 +122,10 @@ class SceneCache:
         agent_info: AgentMetadata,
         scene_ts: int,
         history_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[StateArray, np.ndarray]:
+        """
+        Returns (agent_history_state, agent_extent)
+        """
         raise NotImplementedError()
 
     def get_agent_future(
@@ -118,7 +133,10 @@ class SceneCache:
         agent_info: AgentMetadata,
         scene_ts: int,
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[StateArray, np.ndarray]:
+        """
+        Returns (agent_future_state, agent_extent)
+        """
         raise NotImplementedError()
 
     def get_agents_history(
@@ -126,7 +144,7 @@ class SceneCache:
         scene_ts: int,
         agents: List[AgentMetadata],
         history_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
         raise NotImplementedError()
 
     def get_agents_future(
@@ -134,7 +152,7 @@ class SceneCache:
         scene_ts: int,
         agents: List[AgentMetadata],
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
         raise NotImplementedError()
 
     # TRAFFIC LIGHT INFO

@@ -249,6 +249,11 @@ class LyftDataset(RawDataset):
         all_agent_data_df.sort_index(inplace=True)
         all_agent_data_df.reset_index(level=1, inplace=True)
 
+        # Add in z data based on ego data
+        all_agent_data_df = all_agent_data_df.join(
+            ego_agent.data.xs("ego", level=0)["z"], on="scene_ts"
+        )
+
         ### Calculating agent classes
         agent_class: Dict[int, float] = (
             all_agent_data_df.groupby("agent_id")["class_id"]
@@ -299,6 +304,7 @@ class LyftDataset(RawDataset):
         final_cols = [
             "x",
             "y",
+            "z",
             "vx",
             "vy",
             "ax",

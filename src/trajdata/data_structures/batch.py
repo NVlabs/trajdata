@@ -7,6 +7,7 @@ import torch
 from torch import Tensor
 
 from trajdata.data_structures.agent import AgentType
+from trajdata.data_structures.state import StateTensor
 from trajdata.maps import VectorMap
 from trajdata.utils.arr_utils import PadDirection
 
@@ -18,22 +19,22 @@ class AgentBatch:
     dt: Tensor
     agent_name: List[str]
     agent_type: Tensor
-    curr_agent_state: Tensor
-    agent_hist: Tensor
+    curr_agent_state: StateTensor
+    agent_hist: StateTensor
     agent_hist_extent: Tensor
     agent_hist_len: Tensor
-    agent_fut: Tensor
+    agent_fut: StateTensor
     agent_fut_extent: Tensor
     agent_fut_len: Tensor
     num_neigh: Tensor
     neigh_types: Tensor
-    neigh_hist: Tensor
+    neigh_hist: StateTensor
     neigh_hist_extents: Tensor
     neigh_hist_len: Tensor
-    neigh_fut: Tensor
+    neigh_fut: StateTensor
     neigh_fut_extents: Tensor
     neigh_fut_len: Tensor
-    robot_fut: Optional[Tensor]
+    robot_fut: Optional[StateTensor]
     robot_fut_len: Optional[Tensor]
     map_names: Optional[List[str]]
     maps: Optional[Tensor]
@@ -162,15 +163,15 @@ class SceneBatch:
     dt: Tensor
     num_agents: Tensor
     agent_type: Tensor
-    centered_agent_state: Tensor
+    centered_agent_state: StateTensor
     agent_names: List[str]
-    agent_hist: Tensor
+    agent_hist: StateTensor
     agent_hist_extent: Tensor
     agent_hist_len: Tensor
-    agent_fut: Tensor
+    agent_fut: StateTensor
     agent_fut_extent: Tensor
     agent_fut_len: Tensor
-    robot_fut: Optional[Tensor]
+    robot_fut: Optional[StateTensor]
     robot_fut_len: Optional[Tensor]
     map_names: Optional[Tensor]
     maps: Optional[Tensor]

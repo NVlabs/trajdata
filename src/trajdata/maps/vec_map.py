@@ -333,6 +333,25 @@ class VectorMap:
         """Associates vector map with scene-specific data like traffic light information"""
         self.traffic_light_status = traffic_light_status_dict
 
+    def get_current_lane(
+        self,
+        xyzh: np.ndarray,
+        max_dist: float = 2.0,
+        max_heading_error: float = np.pi / 8,
+    ) -> List[RoadLane]:
+        """
+        Args:
+            xyzh (np.ndarray): 3d position and heading of agent in world coordinates
+
+        Returns:
+            List[RoadLane]: List of possible road lanes that agent could be on
+        """
+        lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
+        return [
+            self.lanes[idx]
+            for idx in lane_kdtree.current_lane_inds(xyzh, max_dist, max_heading_error)
+        ]
+
     def get_closest_lane(self, xyz: np.ndarray) -> RoadLane:
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return self.lanes[lane_kdtree.closest_polyline_ind(xyz)]

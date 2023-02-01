@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,11 +27,16 @@ from trajdata.augmentation.augmentation import Augmentation, DatasetAugmentation
 from trajdata.caching.scene_cache import SceneCache
 from trajdata.data_structures.agent import AgentMetadata, FixedExtent
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import NP_STATE_TYPES, StateArray
 from trajdata.maps.traffic_light_status import TrafficLightStatus
-from trajdata.utils import arr_utils, df_utils, raster_utils
+from trajdata.utils import arr_utils, df_utils, raster_utils, state_utils
 
-STATE_COLS: Final[List[str]] = ["x", "y", "vx", "vy", "ax", "ay"]
+STATE_COLS: Final[List[str]] = ["x", "y", "z", "vx", "vy", "ax", "ay"]
 EXTENT_COLS: Final[List[str]] = ["length", "width", "height"]
+
+# TODO(apoorva) this is kind of serving the same purpose as STATE_COLS above
+STATE_FORMAT_STR: Final[str] = "x,y,z,xd,yd,xdd,ydd,h"
+RawStateArray = NP_STATE_TYPES[STATE_FORMAT_STR]
 
 
 class DataFrameCache(SceneCache):
@@ -61,7 +67,8 @@ class DataFrameCache(SceneCache):
             self._load_agent_data(scene.dt)
 
         # Setting default data transformation parameters.
-        self.reset_transforms()
+        self.reset_obs_format()
+        self.reset_obs_frame()
 
         self._kdtrees = None
 
@@ -101,6 +108,7 @@ class DataFrameCache(SceneCache):
         }
 
         self.pos_cols = [self.column_dict["x"], self.column_dict["y"]]
+        self.z_cols = [self.column_dict["z"]]
         self.vel_cols = [self.column_dict["vx"], self.column_dict["vy"]]
         self.acc_cols = [self.column_dict["ax"], self.column_dict["ay"]]
         if "sin_heading" in self.column_dict:
@@ -112,19 +120,25 @@ class DataFrameCache(SceneCache):
             self.heading_cols = [self.column_dict["heading"]]
 
         self.state_cols = (
-            self.pos_cols + self.vel_cols + self.acc_cols + self.heading_cols
+            self.pos_cols
+            + self.z_cols
+            + self.vel_cols
+            + self.acc_cols
+            + self.heading_cols
         )
         self._state_dim = len(self.state_cols)
-
-        # While it may seem that obs_dim == _state_dim, obs_dim is meant to
-        # track the output dimension of states (which could differ via
-        # returing sin and cos of heading rather than just heading itself).
-        self.obs_dim = self._state_dim
 
         self.extent_cols: List[int] = list()
         for extent_name in ["length", "width", "height"]:
             if extent_name in self.column_dict:
                 self.extent_cols.append(self.column_dict[extent_name])
+
+    @property
+    def obs_dim(self):
+        """
+        obs dim is increased by 1 if we transform heading to sin/cos repr
+        """
+        return self.obs_type.state_dim
 
     def _load_agent_data(self, scene_dt: float) -> None:
         self.scene_data_df: pd.DataFrame = pd.read_feather(
@@ -203,79 +217,86 @@ class DataFrameCache(SceneCache):
             )
             return transformed_pair[0, 0].item()
 
-    def get_raw_state(self, agent_id: str, scene_ts: int) -> np.ndarray:
-        return (
+    def get_raw_state(self, agent_id: str, scene_ts: int) -> RawStateArray:
+        return StateArray.from_array(
             self.scene_data_df.iloc[
                 self.index_dict[(agent_id, scene_ts)], : self._state_dim
             ]
             .to_numpy()
-            .copy()
+            .copy(),
+            STATE_FORMAT_STR,
         )
 
-    def get_state(self, agent_id: str, scene_ts: int) -> np.ndarray:
+    def get_state(self, agent_id: str, scene_ts: int) -> StateArray:
         state = self.get_raw_state(agent_id, scene_ts)
 
-        return self._transform_state(state)
+        return self._observation(state)
 
-    def get_states(self, agent_ids: List[str], scene_ts: int) -> np.ndarray:
+    def get_states(self, agent_ids: List[str], scene_ts: int) -> StateArray:
         row_idxs: List[int] = [
             self.index_dict[(agent_id, scene_ts)] for agent_id in agent_ids
         ]
 
         states = self.scene_data_df.iloc[row_idxs, : self._state_dim].to_numpy()
 
-        return self._transform_state(states)
+        return self._observation(states)
 
-    def transform_data(self, **kwargs) -> None:
-        if "shift_mean_to" in kwargs:
-            # This standardizes the scene to be relative to the agent being predicted.
-            self._transf_mean = kwargs["shift_mean_to"]
+    def set_obs_frame(self, obs_frame: RawStateArray) -> None:
+        """
+        Sets frame in which to return state observations
+        """
+        self._obs_frame = obs_frame
 
-        if "rotate_by" in kwargs:
-            # This rotates the scene so that the predicted agent's current
-            # heading aligns with the x-axis.
-            agent_heading: float = kwargs["rotate_by"]
-            self._transf_rotmat: np.ndarray = np.array(
-                [
-                    [np.cos(agent_heading), -np.sin(agent_heading)],
-                    [np.sin(agent_heading), np.cos(agent_heading)],
-                ]
-            )
+        # compute rotation matrix for convenience
+        heading = -obs_frame.heading[0]
+        self._obs_rot_mat = np.array(
+            [
+                [np.cos(heading), -np.sin(heading)],
+                [np.sin(heading), np.cos(heading)],
+            ]
+        )
 
-        if "sincos_heading" in kwargs:
-            self._sincos_heading = True
-            self.obs_dim = self._state_dim + 1
+    def reset_obs_frame(self) -> None:
+        """
+        Resets observation frame to world frame
+        """
+        self._obs_frame = None
+        self._obs_rot_mat = None
 
-    def reset_transforms(self) -> None:
-        self._transf_mean: Optional[np.ndarray] = None
-        self._transf_rotmat: Optional[np.ndarray] = None
-        self._sincos_heading: bool = False
+    def set_obs_format(self, format_str: str):
+        self._obs_format = format_str
+        self.obs_type = NP_STATE_TYPES[format_str]
 
-        self.obs_dim = self._state_dim
+    def reset_obs_format(self) -> None:
+        self._obs_format = None
+        self.obs_type = RawStateArray
 
-    def _transform_state(self, data: np.ndarray) -> np.ndarray:
-        state: np.ndarray = data.copy()  # Don't want to alter the original data.
+    def _observation(self, raw_state: np.ndarray) -> StateArray:
+        """
+        Turns raw state into state observation, transforming to
+        the frame specified by self.set_observation_frame()
 
-        if len(state.shape) == 1:
-            state = state[np.newaxis, :]
+        Args:
+            raw_state (np.ndarray): assumes this can be safely viewed as RawStateArray
 
-        if self._transf_mean is not None:
-            # Shift to zero mean, but leave heading
-            # standardization for if rotation is also requested (below).
-            state[..., :-1] -= self._transf_mean[:-1]
-
-        if self._transf_rotmat is not None:
-            state[..., self.pos_cols] = state[..., self.pos_cols] @ self._transf_rotmat
-            state[..., self.vel_cols] = state[..., self.vel_cols] @ self._transf_rotmat
-            state[..., self.acc_cols] = state[..., self.acc_cols] @ self._transf_rotmat
-            state[..., -1] -= self._transf_mean[-1]
-
-        if self._sincos_heading:
-            sin_heading: np.ndarray = np.sin(state[..., [-1]])
-            cos_heading: np.ndarray = np.cos(state[..., [-1]])
-            state = np.concatenate([state[..., :-1], sin_heading, cos_heading], axis=-1)
-
-        return state[0] if len(data.shape) == 1 else state
+        Returns:
+            StateArray: _description_
+        """
+        obs = raw_state.copy()
+        batch_dims = raw_state.shape[:-1]
+        # apply transformations
+        if self._obs_frame is not None:
+            # we know obs is "x,y,z,xd,yd,xdd,ydd,h"
+            obs = obs - self._obs_frame
+            # batch rotate vectors
+            obs[..., (0, 1, 3, 4, 5, 6)] = (
+                obs[..., (0, 1, 3, 4, 5, 6)].reshape(-1, 3, 2)
+                @ self._obs_rot_mat.T[None, :, :]
+            ).reshape(*batch_dims, 6)
+        obs = obs.view(RawStateArray)
+        if self._obs_format is not None:
+            obs = obs.as_format(self._obs_format)
+        return obs
 
     def _transform_pair(
         self, data: np.ndarray, col_idxs: Tuple[int, int]
@@ -385,13 +406,18 @@ class DataFrameCache(SceneCache):
         agent_info: AgentMetadata,
         scene_ts: int,
         history_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[StateArray, np.ndarray]:
         # We don't have to check the mins here because our data_index filtering in dataset.py already
         # took care of it.
         first_index_incl: int
         last_index_incl: int = self.index_dict[(agent_info.name, scene_ts)]
         if history_sec[1] is not None:
-            max_history: int = floor(history_sec[1] / self.dt)
+            # Wrapping the input floats with Decimal for exact division
+            # (avoiding float roundoff errors).
+            max_history: int = floor(
+                Decimal(str(history_sec[1])) / Decimal(str(self.dt))
+            )
+
             first_index_incl = self.index_dict[
                 (
                     agent_info.name,
@@ -416,9 +442,7 @@ class DataFrameCache(SceneCache):
             agent_extent_np = agent_history_df.iloc[:, self.extent_cols].to_numpy()
 
         return (
-            self._transform_state(
-                agent_history_df.iloc[:, : self._state_dim].to_numpy()
-            ),
+            self._observation(agent_history_df.iloc[:, : self._state_dim].to_numpy()),
             agent_extent_np,
         )
 
@@ -427,9 +451,9 @@ class DataFrameCache(SceneCache):
         agent_info: AgentMetadata,
         scene_ts: int,
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        # We don't have to check the mins here because our data_index filtering in dataset.py already
-        # took care of it.
+    ) -> Tuple[StateArray, np.ndarray]:
+        # We don't have to check the mins here because our data_index filtering in
+        # dataset.py already took care of it.
         if scene_ts >= agent_info.last_timestep:
             # Extent shape = 3
             return np.zeros((0, self.obs_dim)), np.zeros((0, 3))
@@ -437,7 +461,9 @@ class DataFrameCache(SceneCache):
         first_index_incl: int = self.index_dict[(agent_info.name, scene_ts + 1)]
         last_index_incl: int
         if future_sec[1] is not None:
-            max_future = floor(future_sec[1] / self.dt)
+            # Wrapping the input floats with Decimal for exact division
+            # (avoiding float roundoff errors).
+            max_future = floor(Decimal(str(future_sec[1])) / Decimal(str(self.dt)))
             last_index_incl = self.index_dict[
                 (agent_info.name, min(scene_ts + max_future, agent_info.last_timestep))
             ]
@@ -459,9 +485,7 @@ class DataFrameCache(SceneCache):
             agent_extent_np = agent_future_df.iloc[:, self.extent_cols].to_numpy()
 
         return (
-            self._transform_state(
-                agent_future_df.iloc[:, : self._state_dim].to_numpy()
-            ),
+            self._observation(agent_future_df.iloc[:, : self._state_dim].to_numpy()),
             agent_extent_np,
         )
 
@@ -470,12 +494,16 @@ class DataFrameCache(SceneCache):
         scene_ts: int,
         agents: List[AgentMetadata],
         history_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
         first_timesteps = np.array(
             [agent.first_timestep for agent in agents], dtype=int
         )
         if history_sec[1] is not None:
-            max_history: int = floor(history_sec[1] / self.dt)
+            # Wrapping the input floats with Decimal for exact division
+            # (avoiding float roundoff errors).
+            max_history: int = floor(
+                Decimal(str(history_sec[1])) / Decimal(str(self.dt))
+            )
             first_timesteps = np.maximum(scene_ts - max_history, first_timesteps)
 
         first_index_incl: np.ndarray = np.array(
@@ -494,11 +522,11 @@ class DataFrameCache(SceneCache):
 
         neighbor_history_lens_np = last_index_incl - first_index_incl + 1
 
-        neighbor_histories_np = self._transform_state(
+        neighbor_histories_np = self._observation(
             neighbor_data_df.iloc[:, : self._state_dim].to_numpy()
         )
         # The last one will always be empty because of what cumsum returns.
-        neighbor_histories: List[np.ndarray] = np.vsplit(
+        neighbor_histories: List[StateArray] = np.vsplit(
             neighbor_histories_np, neighbor_history_lens_np.cumsum()
         )[:-1]
 
@@ -529,13 +557,15 @@ class DataFrameCache(SceneCache):
         scene_ts: int,
         agents: List[AgentMetadata],
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
         last_timesteps = np.array([agent.last_timestep for agent in agents], dtype=int)
 
         first_timesteps = np.minimum(scene_ts + 1, last_timesteps)
 
         if future_sec[1] is not None:
-            max_future: int = floor(future_sec[1] / self.dt)
+            # Wrapping the input floats with Decimal for exact division
+            # (avoiding float roundoff errors).
+            max_future: int = floor(Decimal(str(future_sec[1])) / Decimal(str(self.dt)))
             last_timesteps = np.minimum(scene_ts + max_future, last_timesteps)
 
         first_index_incl: np.ndarray = np.array(
@@ -558,11 +588,11 @@ class DataFrameCache(SceneCache):
 
         neighbor_future_lens_np = last_index_incl - first_index_incl + 1
 
-        neighbor_futures_np = self._transform_state(
+        neighbor_futures_np = self._observation(
             neighbor_data_df.iloc[:, : self._state_dim].to_numpy()
         )
         # The last one will always be empty because of what cumsum returns.
-        neighbor_futures: List[np.ndarray] = np.vsplit(
+        neighbor_futures: List[StateArray] = np.vsplit(
             neighbor_futures_np, neighbor_future_lens_np.cumsum()
         )[:-1]
 

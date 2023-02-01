@@ -122,6 +122,7 @@ class TestSceneToAgentBatchConversion(unittest.TestCase):
                 self._scene_dataset.incl_raster_map,
                 self._scene_dataset.raster_map_params,
                 self._scene_dataset.max_neighbor_num,
+                self._scene_dataset.state_format,
                 self._scene_dataset.standardize_data,
                 self._scene_dataset.standardize_derivatives,
                 pad_format="right",
@@ -168,7 +169,7 @@ class TestSceneToAgentBatchConversion(unittest.TestCase):
 
             if val is None:
                 self.assertTrue(agent_batch.__dict__[attr] is None)
-            elif type(val[agent_idx]) is torch.Tensor:
+            elif isinstance(val[agent_idx], torch.Tensor):
                 if attr in variable_length_keys:
                     attr_len = converted_agent_batch.__dict__[
                         variable_length_keys[attr]
@@ -178,9 +179,16 @@ class TestSceneToAgentBatchConversion(unittest.TestCase):
                 else:
                     convertedTensor = val[agent_idx]
                     targetTensor = agent_batch.__dict__[attr][0]
-                self._assert_allclose_with_nans(convertedTensor, targetTensor)
+                try:
+                    self._assert_allclose_with_nans(convertedTensor, targetTensor)
+                except RuntimeError as e:
+                    print(f"Error at {attr=}")
+                    raise e
             else:
-                self.assertTrue(val[agent_idx] == agent_batch.__dict__[attr][0])
+                self.assertTrue(
+                    val[agent_idx] == agent_batch.__dict__[attr][0],
+                    f"Failed at {attr=}",
+                )
 
     def test_index_1(self):
         self._test_agent_idx(0, verbose=False)
@@ -190,3 +198,7 @@ class TestSceneToAgentBatchConversion(unittest.TestCase):
 
     def test_index_3(self):
         self._test_agent_idx(222, verbose=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

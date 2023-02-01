@@ -6,18 +6,19 @@ import numpy as np
 import seaborn as sns
 import torch
 from matplotlib.axes import Axes
-from matplotlib.patches import Circle, FancyBboxPatch
+from matplotlib.patches import FancyBboxPatch, Polygon
 from torch import Tensor
 
 from trajdata.data_structures.agent import AgentType
 from trajdata.data_structures.batch import AgentBatch, SceneBatch
+from trajdata.data_structures.state import StateTensor
 from trajdata.maps import RasterizedMap
 
 
 def draw_agent(
     ax: Axes,
     agent_type: AgentType,
-    agent_state: Tensor,
+    agent_state: StateTensor,
     agent_extent: Tensor,
     agent_to_world_tf: Tensor,
     **kwargs,
@@ -49,19 +50,22 @@ def draw_agent(
         length = agent_extent[0].item()
         width = agent_extent[1].item()
 
-    patch = FancyBboxPatch(
-        [-length / 2, -width / 2], length, width, boxstyle="rarrow", **kwargs
-    )
+    xy = agent_state.position
+    heading = agent_state.heading
+
+    patch = FancyBboxPatch([-length / 2, -width / 2], length, width, **kwargs)
     transform = (
-        mtransforms.Affine2D()
-        .rotate(np.arctan2(agent_state[-2].item(), agent_state[-1].item()))
-        .translate(agent_state[0], agent_state[1])
+        mtransforms.Affine2D().rotate(heading[0].item()).translate(xy[0], xy[1])
         + mtransforms.Affine2D(matrix=agent_to_world_tf.cpu().numpy())
         + ax.transData
     )
     patch.set_transform(transform)
 
-    center_patch = Circle([0, 0], radius=0.25, **kwargs)
+    kwargs["label"] = None
+    size = 1.0
+    angles = [0, 2 * np.pi / 3, np.pi, 4 * np.pi / 3]
+    pts = np.stack([size * np.cos(angles), size * np.sin(angles)], axis=-1)
+    center_patch = Polygon(pts, zorder=10.0, **kwargs)
     center_patch.set_transform(transform)
 
     ax.add_patch(patch)
@@ -69,13 +73,13 @@ def draw_agent(
 
 
 def draw_history(
-    ax,
-    agent_type,
-    agent_history,
-    agent_extent,
-    agent_to_world_tf,
-    start_alpha=0.2,
-    end_alpha=0.5,
+    ax: Axes,
+    agent_type: AgentType,
+    agent_history: StateTensor,
+    agent_extent: Tensor,
+    agent_to_world_tf: Tensor,
+    start_alpha: float = 0.2,
+    end_alpha: float = 0.5,
     **kwargs,
 ):
     T = agent_history.shape[0]
@@ -92,18 +96,34 @@ def draw_history(
         )
 
 
-def draw_map(ax: Axes, map: Tensor, base_frame_from_map_tf: Tensor, **kwargs):
+def draw_map(
+    ax: Axes, map: Tensor, base_frame_from_map_tf: Tensor, alpha=1.0, **kwargs
+):
     patch_size: int = map.shape[-1]
     map_array = RasterizedMap.to_img(map.cpu())
     brightened_map_array = map_array * 0.2 + 0.8
 
     im = ax.imshow(
-        brightened_map_array, extent=[0, patch_size, patch_size, 0], **kwargs
+        brightened_map_array,
+        extent=[0, patch_size, patch_size, 0],
+        clip_on=True,
+        **kwargs,
     )
     transform = (
         mtransforms.Affine2D(matrix=base_frame_from_map_tf.cpu().numpy()) + ax.transData
     )
     im.set_transform(transform)
+
+    coords = np.array(
+        [[0, 0, 1], [patch_size, 0, 1], [patch_size, patch_size, 1], [0, patch_size, 1]]
+    )
+    world_frame_corners = base_frame_from_map_tf.cpu().numpy() @ coords[:, :, None]
+    xmin = np.min(world_frame_corners[:, 0, 0])
+    xmax = np.max(world_frame_corners[:, 0, 0])
+    ymin = np.min(world_frame_corners[:, 1, 0])
+    ymax = np.max(world_frame_corners[:, 1, 0])
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
 
 
 def plot_agent_batch_all(
@@ -154,13 +174,14 @@ def plot_agent_batch_all(
             agent_hist[:-1, :],
             agent_extent,
             base_frame_from_agent_tf,
-            color=color,
+            facecolor="None",
+            edgecolor=color,
             linewidth=0,
         )
         ax.plot(
             agent_hist[:, 0],
             agent_hist[:, 1],
-            linestyle="-",
+            linestyle="--",
             color=color,
             transform=transform,
         )
@@ -176,7 +197,7 @@ def plot_agent_batch_all(
         ax.plot(
             agent_fut[:, 0],
             agent_fut[:, 1],
-            linestyle="--",
+            linestyle="-",
             color=color,
             transform=transform,
         )
@@ -205,99 +226,118 @@ def plot_agent_batch(
 
     agent_name: str = batch.agent_name[batch_idx]
     agent_type: AgentType = AgentType(batch.agent_type[batch_idx].item())
-    ax.set_title(f"{str(agent_type)}/{agent_name}")
+    current_state = batch.curr_agent_state[batch_idx].numpy()
+    ax.set_title(
+        f"{str(agent_type)}/{agent_name}\nat x={current_state[0]:.2f},y={current_state[1]:.2f},h={current_state[-1]:.2f}"
+    )
 
-    history_xy: Tensor = batch.agent_hist[batch_idx].cpu()
-    center_xy: Tensor = batch.agent_hist[batch_idx, -1, :2].cpu()
-    future_xy: Tensor = batch.agent_fut[batch_idx, :, :2].cpu()
+    agent_from_world_tf: Tensor = batch.agents_from_world_tf[batch_idx].cpu()
 
     if batch.maps is not None:
-        agent_from_world_tf: Tensor = batch.agents_from_world_tf[batch_idx].cpu()
         world_from_raster_tf: Tensor = torch.linalg.inv(
             batch.rasters_from_world_tf[batch_idx].cpu()
         )
 
         agent_from_raster_tf: Tensor = agent_from_world_tf @ world_from_raster_tf
 
-        patch_size: int = batch.maps[batch_idx].shape[-1]
+        draw_map(ax, batch.maps[batch_idx], agent_from_raster_tf, alpha=1.0)
 
-        left_extent: float = (agent_from_raster_tf @ torch.tensor([0.0, 0.0, 1.0]))[
-            0
-        ].item()
-        right_extent: float = (
-            agent_from_raster_tf @ torch.tensor([patch_size, 0.0, 1.0])
-        )[0].item()
-        bottom_extent: float = (
-            agent_from_raster_tf @ torch.tensor([0.0, patch_size, 1.0])
-        )[1].item()
-        top_extent: float = (agent_from_raster_tf @ torch.tensor([0.0, 0.0, 1.0]))[
-            1
-        ].item()
+    agent_hist = batch.agent_hist[batch_idx].cpu()
+    agent_fut = batch.agent_fut[batch_idx].cpu()
+    agent_extent = batch.agent_hist_extent[batch_idx, -1, :].cpu()
+    base_frame_from_agent_tf = torch.eye(3)
 
-        ax.imshow(
-            RasterizedMap.to_img(
-                batch.maps[batch_idx].cpu(),
-                # [[0], [1], [2]]
-                # [[0, 1, 2], [3, 4], [5, 6]],
-            ),
-            extent=(
-                left_extent,
-                right_extent,
-                bottom_extent,
-                top_extent,
-            ),
-            alpha=0.3,
-        )
+    palette = sns.color_palette("husl", 4)
+    if agent_type == AgentType.VEHICLE:
+        color = palette[0]
+    elif agent_type == AgentType.PEDESTRIAN:
+        color = palette[1]
+    elif agent_type == AgentType.BICYCLE:
+        color = palette[2]
+    else:
+        color = palette[3]
 
+    draw_history(
+        ax,
+        agent_type,
+        agent_hist[:-1],
+        agent_extent,
+        base_frame_from_agent_tf,
+        facecolor=color,
+        edgecolor=None,
+        linewidth=0,
+    )
     ax.plot(
-        history_xy[..., 0],
-        history_xy[..., 1],
-        c="orange",
-        ls="--",
+        agent_hist.get_attr("x"),
+        agent_hist.get_attr("y"),
+        linestyle="--",
+        color=color,
         label="Agent History",
     )
-    # ax.quiver(
-    #     history_xy[..., 0],
-    #     history_xy[..., 1],
-    #     history_xy[..., -1],
-    #     history_xy[..., -2],
-    #     color="k",
-    # )
-
-    ax.plot(future_xy[..., 0], future_xy[..., 1], c="violet", label="Agent Future")
-    ax.scatter(center_xy[0], center_xy[1], s=20, c="orangered", label="Agent Current")
+    draw_agent(
+        ax,
+        agent_type,
+        agent_hist[-1],
+        agent_extent,
+        base_frame_from_agent_tf,
+        facecolor=color,
+        edgecolor="k",
+        label="Agent Current",
+    )
+    ax.plot(
+        agent_fut.get_attr("x"),
+        agent_fut.get_attr("y"),
+        linestyle="-",
+        color=color,
+        label="Agent Future",
+    )
 
     num_neigh = batch.num_neigh[batch_idx]
     if num_neigh > 0:
-        neighbor_hist = batch.neigh_hist[batch_idx]
-        neighbor_fut = batch.neigh_fut[batch_idx]
+        neighbor_hist = batch.neigh_hist[batch_idx].cpu()
+        neighbor_fut = batch.neigh_fut[batch_idx].cpu()
+        neighbor_extent = batch.neigh_hist_extents[batch_idx, :, -1, :].cpu()
+        neighbor_type = batch.neigh_types[batch_idx].cpu()
 
         ax.plot([], [], c="olive", ls="--", label="Neighbor History")
-        for n in range(num_neigh):
-            ax.plot(neighbor_hist[n, :, 0], neighbor_hist[n, :, 1], c="olive", ls="--")
-
         ax.plot([], [], c="darkgreen", label="Neighbor Future")
-        for n in range(num_neigh):
-            ax.plot(neighbor_fut[n, :, 0], neighbor_fut[n, :, 1], c="darkgreen")
 
-        ax.scatter(
-            neighbor_hist[:num_neigh, -1, 0],
-            neighbor_hist[:num_neigh, -1, 1],
-            s=20,
-            c="gold",
-            label="Neighbor Current",
-        )
+        for n in range(num_neigh):
+            if torch.isnan(neighbor_hist[n, -1, :]).any():
+                # this neighbor does not exist at the current timestep
+                continue
+            ax.plot(
+                neighbor_hist.get_attr("x")[n, :],
+                neighbor_hist.get_attr("y")[n, :],
+                c="olive",
+                ls="--",
+            )
+            draw_agent(
+                ax,
+                neighbor_type[n],
+                neighbor_hist[n, -1],
+                neighbor_extent[n, :],
+                base_frame_from_agent_tf,
+                facecolor="olive",
+                edgecolor="k",
+                alpha=0.7,
+            )
+            ax.plot(
+                neighbor_fut.get_attr("x")[n, :],
+                neighbor_fut.get_attr("y")[n, :],
+                c="darkgreen",
+            )
 
     if batch.robot_fut is not None and batch.robot_fut.shape[1] > 0:
         ax.plot(
-            batch.robot_fut[batch_idx, 1:, 0],
-            batch.robot_fut[batch_idx, 1:, 1],
+            batch.robot_fut.get_attr("x")[batch_idx, 1:],
+            batch.robot_fut.get_attr("y")[batch_idx, 1:],
             label="Ego Future",
             c="blue",
         )
         ax.scatter(
-            batch.robot_fut[batch_idx, 0, 0],
-            batch.robot_fut[batch_idx, 0, 1],
+            batch.robot_fut.get_attr("x")[batch_idx, 0],
+            batch.robot_fut.get_attr("y")[batch_idx, 0],
             s=20,
             c="blue",
             label="Ego Current",
@@ -307,7 +347,7 @@ def plot_agent_batch(
     ax.set_ylabel("y (m)")
 
     ax.grid(False)
-    ax.axis("equal")
+    ax.set_aspect("equal", adjustable="box")
 
     # Doing this because the imshow above makes the map origin at the top.
     # TODO(pkarkus) we should just modify imshow not to change the origin instead.
@@ -337,90 +377,65 @@ def plot_scene_batch(
 
     num_agents: int = batch.num_agents[batch_idx].item()
 
-    history_xy: Tensor = batch.agent_hist[batch_idx].cpu()
-    center_xy: Tensor = batch.agent_hist[batch_idx, ..., -1, :2].cpu()
-    future_xy: Tensor = batch.agent_fut[batch_idx, ..., :2].cpu()
+    agent_from_world_tf: Tensor = batch.centered_agent_from_world_tf[batch_idx].cpu()
 
     if batch.maps is not None:
-        centered_agent_id: int = 0
-        agent_from_world_tf: Tensor = batch.centered_agent_from_world_tf[
-            batch_idx
-        ].cpu()
+        centered_agent_id = 0
         world_from_raster_tf: Tensor = torch.linalg.inv(
             batch.rasters_from_world_tf[batch_idx, centered_agent_id].cpu()
         )
 
         agent_from_raster_tf: Tensor = agent_from_world_tf @ world_from_raster_tf
 
-        patch_size: int = batch.maps[batch_idx, centered_agent_id].shape[-1]
-
-        left_extent: float = (agent_from_raster_tf @ torch.tensor([0.0, 0.0, 1.0]))[
-            0
-        ].item()
-        right_extent: float = (
-            agent_from_raster_tf @ torch.tensor([patch_size, 0.0, 1.0])
-        )[0].item()
-        bottom_extent: float = (
-            agent_from_raster_tf @ torch.tensor([0.0, patch_size, 1.0])
-        )[1].item()
-        top_extent: float = (agent_from_raster_tf @ torch.tensor([0.0, 0.0, 1.0]))[
-            1
-        ].item()
-
-        ax.imshow(
-            RasterizedMap.to_img(
-                batch.maps[batch_idx, centered_agent_id].cpu(),
-                # [[0], [1], [2]]
-                # [[0, 1, 2], [3, 4], [5, 6]],
-            ),
-            extent=(
-                left_extent,
-                right_extent,
-                bottom_extent,
-                top_extent,
-            ),
-            alpha=0.3,
+        draw_map(
+            ax,
+            batch.maps[batch_idx, centered_agent_id],
+            agent_from_raster_tf,
+            alpha=1.0,
         )
+
+    base_frame_from_agent_tf = torch.eye(3)
+    agent_hist = batch.agent_hist[batch_idx]
+    agent_type = batch.agent_type[batch_idx]
+    agent_extent = batch.agent_hist_extent[batch_idx, :, -1]
+    agent_fut = batch.agent_fut[batch_idx]
 
     for agent_id in range(num_agents):
         ax.plot(
-            history_xy[agent_id, ..., 0],
-            history_xy[agent_id, ..., 1],
+            agent_hist.get_attr("x")[agent_id],
+            agent_hist.get_attr("y")[agent_id],
             c="orange",
             ls="--",
             label="Agent History" if agent_id == 0 else None,
         )
-        ax.quiver(
-            history_xy[agent_id, ..., 0],
-            history_xy[agent_id, ..., 1],
-            history_xy[agent_id, ..., -1],
-            history_xy[agent_id, ..., -2],
-            color="k",
+        draw_agent(
+            ax,
+            agent_type[agent_id],
+            agent_hist[agent_id, -1],
+            agent_extent[agent_id],
+            base_frame_from_agent_tf,
+            facecolor="olive",
+            edgecolor="k",
+            alpha=0.7,
+            label="Agent Current" if agent_id == 0 else None,
         )
         ax.plot(
-            future_xy[agent_id, ..., 0],
-            future_xy[agent_id, ..., 1],
+            agent_fut.get_attr("x")[agent_id],
+            agent_fut.get_attr("y")[agent_id],
             c="violet",
             label="Agent Future" if agent_id == 0 else None,
-        )
-        ax.scatter(
-            center_xy[agent_id, 0],
-            center_xy[agent_id, 1],
-            s=20,
-            c="orangered",
-            label="Agent Current" if agent_id == 0 else None,
         )
 
     if batch.robot_fut is not None and batch.robot_fut.shape[1] > 0:
         ax.plot(
-            batch.robot_fut[batch_idx, 1:, 0],
-            batch.robot_fut[batch_idx, 1:, 1],
+            batch.robot_fut.get_attr("x")[batch_idx, 1:],
+            batch.robot_fut.get_attr("y")[batch_idx, 1:],
             label="Ego Future",
             c="blue",
         )
         ax.scatter(
-            batch.robot_fut[batch_idx, 0, 0],
-            batch.robot_fut[batch_idx, 0, 1],
+            batch.robot_fut.get_attr("x")[batch_idx, 0],
+            batch.robot_fut.get_attr("y")[batch_idx, 0],
             s=20,
             c="blue",
             label="Ego Current",
@@ -430,8 +445,8 @@ def plot_scene_batch(
     ax.set_ylabel("y (m)")
 
     ax.grid(False)
+    ax.set_aspect("equal", adjustable="box")
     ax.legend(loc="best", frameon=True)
-    ax.axis("equal")
 
     # Doing this because the imshow above makes the map origin at the top.
     ax.invert_yaxis()

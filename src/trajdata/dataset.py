@@ -28,6 +28,8 @@ from trajdata import filtering
 from trajdata.augmentation.augmentation import Augmentation, BatchAugmentation
 from trajdata.caching import EnvCache, SceneCache, df_cache
 from trajdata.data_structures import (
+    NP_STATE_TYPES,
+    TORCH_STATE_TYPES,
     AgentBatchElement,
     AgentDataIndex,
     AgentMetadata,
@@ -82,6 +84,8 @@ class UnifiedDataset(Dataset):
         only_types: Optional[List[AgentType]] = None,
         only_predict: Optional[List[AgentType]] = None,
         no_types: Optional[List[AgentType]] = None,
+        state_format: str = "x,y,xd,yd,xdd,ydd,h",
+        obs_format: str = "x,y,xd,yd,xdd,ydd,s,c",
         standardize_data: bool = True,
         standardize_derivatives: bool = False,
         augmentations: Optional[List[Augmentation]] = None,
@@ -135,6 +139,8 @@ class UnifiedDataset(Dataset):
             only_types (Optional[List[AgentType]], optional): Filter out all agents EXCEPT for those of the specified types. Defaults to None.
             only_predict (Optional[List[AgentType]], optional): Only predict the specified types of agents. Importantly, this keeps other agent types in the scene, e.g., as neighbors of the agent to be predicted. Defaults to None.
             no_types (Optional[List[AgentType]], optional): Filter out all agents with the specified types. Defaults to None.
+            state_format (str, optional): Ordered comma separated list of elements to return for current/centered agent state. Defaults to "x,y,xd,yd,xdd,ydd,h".
+            obs_format (str, optional): Ordered comma separated list of elements to return for history and future agent state arrays. Defaults to "x,y,xd,yd,xdd,ydd,s,c".
             standardize_data (bool, optional): Standardize all data such that (1) the predicted agent's orientation at the current timestep is 0, (2) all data is made relative to the predicted agent's current position, and (3) the agent's heading value is replaced with its sin, cos values. Defaults to True.
             standardize_derivatives (bool, optional): Make agent velocities and accelerations relative to the agent being predicted. Defaults to False.
             augmentations (Optional[List[Augmentation]], optional): Perform the specified augmentations to the batch or dataset. Defaults to None.
@@ -200,6 +206,8 @@ class UnifiedDataset(Dataset):
         self.only_types = None if only_types is None else set(only_types)
         self.only_predict = None if only_predict is None else set(only_predict)
         self.no_types = None if no_types is None else set(no_types)
+        self.state_format = state_format
+        self.obs_format = obs_format
         self.standardize_data = standardize_data
         self.standardize_derivatives = standardize_derivatives
         self.augmentations = augmentations
@@ -210,6 +218,13 @@ class UnifiedDataset(Dataset):
         self.rank = rank
         self.max_neighbor_num = max_neighbor_num
         self.ego_only = ego_only
+
+        # Create requested state types now so pickling works
+        # (Needed for multiprocess dataloading)
+        self.np_state_type = NP_STATE_TYPES[state_format]
+        self.np_obs_type = NP_STATE_TYPES[obs_format]
+        self.torch_state_type = TORCH_STATE_TYPES[state_format]
+        self.torch_obs_type = TORCH_STATE_TYPES[obs_format]
 
         # Ensuring scene description queries are all lowercase
         if scene_description_contains is not None:
@@ -877,6 +892,7 @@ class UnifiedDataset(Dataset):
         scene_cache: SceneCache = self.cache_class(
             self.cache_path, scene, self.augmentations
         )
+        scene_cache.set_obs_format(self.obs_format)
 
         if self.centric == "scene":
             scene_time: SceneTime = SceneTime.from_cache(
@@ -899,6 +915,7 @@ class UnifiedDataset(Dataset):
                 self.raster_map_params,
                 self._map_api,
                 self.vector_map_params,
+                self.state_format,
                 self.standardize_data,
                 self.standardize_derivatives,
                 self.max_agent_num,
@@ -926,6 +943,7 @@ class UnifiedDataset(Dataset):
                 self.raster_map_params,
                 self._map_api,
                 self.vector_map_params,
+                self.state_format,
                 self.standardize_data,
                 self.standardize_derivatives,
                 self.max_neighbor_num,

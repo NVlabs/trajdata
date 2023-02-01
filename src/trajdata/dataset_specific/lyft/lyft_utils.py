@@ -29,12 +29,16 @@ def agg_ego_data(lyft_obj: ChunkedDataset, scene: Scene) -> Agent:
 
     ego_translations = lyft_obj.frames[scene_frame_start:scene_frame_end][
         "ego_translation"
-    ][:, :2]
+    ][:, :3]
 
     # Doing this prepending so that the first velocity isn't zero (rather it's just the first actual velocity duplicated)
-    prepend_pos = ego_translations[0] - (ego_translations[1] - ego_translations[0])
+    prepend_pos = ego_translations[0, :2] - (
+        ego_translations[1, :2] - ego_translations[0, :2]
+    )
     ego_velocities = (
-        np.diff(ego_translations, axis=0, prepend=np.expand_dims(prepend_pos, axis=0))
+        np.diff(
+            ego_translations[:, :2], axis=0, prepend=np.expand_dims(prepend_pos, axis=0)
+        )
         / LYFT_DT
     )
 
@@ -67,7 +71,7 @@ def agg_ego_data(lyft_obj: ChunkedDataset, scene: Scene) -> Agent:
     )
     ego_data_df = pd.DataFrame(
         ego_data_np,
-        columns=["x", "y", "vx", "vy", "ax", "ay", "heading"] + extent_cols,
+        columns=["x", "y", "z", "vx", "vy", "ax", "ay", "heading"] + extent_cols,
         index=pd.MultiIndex.from_tuples(
             [("ego", idx) for idx in range(ego_data_np.shape[0])],
             names=["agent_id", "scene_ts"],

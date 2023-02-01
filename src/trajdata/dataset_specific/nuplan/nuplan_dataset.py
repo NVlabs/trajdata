@@ -236,7 +236,9 @@ class NuplanDataset(RawDataset):
         all_frames: pd.DataFrame = self.dataset_obj.get_scene_frames(scene)
 
         ego_df = (
-            all_frames[["ego_x", "ego_y", "ego_vx", "ego_vy", "ego_ax", "ego_ay"]]
+            all_frames[
+                ["ego_x", "ego_y", "ego_z", "ego_vx", "ego_vy", "ego_ax", "ego_ay"]
+            ]
             .rename(columns=lambda name: name[4:])
             .reset_index(drop=True)
         )
