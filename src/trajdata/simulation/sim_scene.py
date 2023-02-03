@@ -12,6 +12,7 @@ from trajdata.data_structures.batch_element import AgentBatchElement
 from trajdata.data_structures.collation import agent_collate_fn
 from trajdata.data_structures.scene import SceneTimeAgent
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray
 from trajdata.dataset import UnifiedDataset
 from trajdata.simulation.sim_cache import SimulationCache
 from trajdata.simulation.sim_df_cache import SimulationDataFrameCache
@@ -94,12 +95,12 @@ class SimulationScene:
 
     def step(
         self,
-        new_xyh_dict: Dict[str, np.ndarray],
+        new_xyzh_dict: Dict[str, StateArray],
         return_obs=True,
     ) -> Union[AgentBatch, Dict[str, Any]]:
         self.scene_ts += 1
 
-        self.cache.append_state(new_xyh_dict)
+        self.cache.append_state(new_xyzh_dict)
 
         if not self.freeze_agents:
             agents_present: List[AgentMetadata] = self.scene.agent_presence[

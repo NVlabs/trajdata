@@ -9,6 +9,7 @@ from trajdata.augmentation.augmentation import Augmentation
 from trajdata.caching.df_cache import DataFrameCache
 from trajdata.data_structures.agent import AgentMetadata
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray
 from trajdata.simulation.sim_cache import SimulationCache
 from trajdata.simulation.sim_metrics import SimMetric
 from trajdata.simulation.sim_stats import SimStatistic
@@ -76,33 +77,40 @@ class SimulationDataFrameCache(DataFrameCache, SimulationCache):
 
         return super().get_agents_future(scene_ts, agents, future_sec)
 
-    def append_state(self, xyh_dict: Dict[str, np.ndarray]) -> None:
+    def append_state(self, xyzh_dict: Dict[str, StateArray]) -> None:
         self.scene_ts += 1
 
         sim_dict: Dict[str, List[Union[str, float, int]]] = defaultdict(list)
-        prev_states: np.ndarray = self.get_states(
-            list(xyh_dict.keys()), self.scene_ts - 1
+        prev_states: StateArray = self.get_states(
+            list(xyzh_dict.keys()), self.scene_ts - 1
         )
-        for idx, (agent, new_xyh) in enumerate(xyh_dict.items()):
-            prev_state = prev_states[idx]
+
+        new_xyzh: StateArray
+        for idx, (agent, new_xyzh) in enumerate(xyzh_dict.items()):
+            prev_state: StateArray = prev_states[idx]
 
             sim_dict["agent_id"].append(agent)
             sim_dict["scene_ts"].append(self.scene_ts)
 
-            sim_dict["x"].append(new_xyh[0])
-            sim_dict["y"].append(new_xyh[1])
+            old_x, old_y = prev_state.position
+            new_x, new_y = new_xyzh.position
 
-            vx: float = (new_xyh[0] - prev_state[0]) / self.scene.dt
-            vy: float = (new_xyh[1] - prev_state[1]) / self.scene.dt
+            sim_dict["x"].append(new_x)
+            sim_dict["y"].append(new_y)
+
+            vx: float = (new_x - old_x) / self.scene.dt
+            vy: float = (new_y - old_y) / self.scene.dt
             sim_dict["vx"].append(vx)
             sim_dict["vy"].append(vy)
 
-            ax: float = (vx - prev_state[2]) / self.scene.dt
-            ay: float = (vy - prev_state[3]) / self.scene.dt
+            old_vx, old_vy = prev_state.velocity
+
+            ax: float = (vx - old_vx) / self.scene.dt
+            ay: float = (vy - old_vy) / self.scene.dt
             sim_dict["ax"].append(ax)
             sim_dict["ay"].append(ay)
 
-            sim_dict["heading"].append(new_xyh[2])
+            sim_dict["heading"].append(new_xyzh.heading.item())
 
             if self.extent_cols:
                 sim_dict["length"].append(
