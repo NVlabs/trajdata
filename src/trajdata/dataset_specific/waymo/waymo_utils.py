@@ -1,11 +1,8 @@
-import copy
+import os.path
 import pathlib
-import time
-from multiprocessing import Pool
 from typing import Dict, Final, List, Tuple
-
+from subprocess import check_call, check_output
 import numpy as np
-import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
 from waymo_open_dataset.protos import map_pb2 as waymo_map_pb2
@@ -35,35 +32,48 @@ def parse_data(data):
     scenario.ParseFromString(data)
     return scenario
 class WaymoScenarios:
-    def __init__(self, dataset_name, source_dir, load=True, num_parallel_reads=None):
+    def __init__(self, dataset_name, source_dir, download=True, split=True):
         if dataset_name not in WAYMO_DATASET_NAMES:
             raise RuntimeError('Wrong dataset name. Please choose name from '+str(WAYMO_DATASET_NAMES))
         self.name = dataset_name
         self.source_dir = source_dir
+        self.split = split
+        self.scene_length = 9
+        if download:
+            self.download_dataset()
+        if split:
+            self.split_scenarios()
+    def download_dataset(self):
+        check_call("snap install google-cloud-sdk --classic".split())
+        gsutil = check_output(["which", "gsutil"])
+        print(gsutil.decode("utf-8"))
+        download_cmd = (gsutil.decode("utf-8")+"-m cp -r gs://waymo_open_dataset_motion_v_1_1_0/uncompressed/scenario/"+self.name+" "+self.source_dir).split()
+        check_call(download_cmd)
+
+    def split_scenarios(self, num_parallel_reads=20, verbose=True):
         self.scenarios = []
-        if load:
-            self.load_scenarios(num_parallel_reads)
-    def load_scenarios(self, num_parallel_reads, verbose=True):
-        self.scenarios = []
-        source_it = pathlib.Path().glob(self.source_dir+'/'+self.name + "/*.tfrecord")
+        source_it = pathlib.Path().glob(self.source_dir+'/'+self.name + "/*")
         file_names = [str(file_name) for file_name in source_it if file_name.is_file()]
         if verbose:
             print("Loading tfrecord files...")
-        dataset = tf.data.TFRecordDataset(file_names, compression_type='', num_parallel_reads=num_parallel_reads).as_numpy_iterator()
+        dataset = tf.data.TFRecordDataset(file_names, compression_type='', num_parallel_reads=num_parallel_reads)
 
         if verbose:
-            print("Converting to protobufs...")
-        start = time.perf_counter()
-        dataset = np.fromiter(dataset, bytearray)
-        # use multiprocessing:
-        # self.scenarios = Pool().map(parse_data, dataset)
-        # use np vectorization (faster with my computer):
-        parser = np.vectorize(parse_data)
-        self.scenarios = parser(dataset)
-        print(time.perf_counter()-start)
-        if verbose:
-            print(str(len(self.scenarios)) + " scenarios from " + str(len(file_names)) + " file(s) have been loaded successfully")
+            print("Splitting tfrecords...")
 
+        splitted_dir = os.path.join(self.source_dir, self.name+"_splitted")
+        if not os.path.exists(splitted_dir):
+            os.makedirs(splitted_dir)
+        i = 0
+        for data in tqdm(dataset):
+            file_name = os.path.join(splitted_dir, self.name+"_splitted_"+str(i)+ ".tfrecords")
+            with tf.io.TFRecordWriter(file_name) as file_writer:
+                file_writer.write(data.numpy())
+            # break
+            i += 1
+        self.num_scenarios = i
+        if verbose:
+            print(str(i) + " scenarios from " + str(len(file_names)) + " file(s) have been splitted into "+ str(i) + "files")
 
 def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
     vec_map = vectorized_map_pb2.VectorizedMap()
@@ -120,7 +130,7 @@ def get_smaller_elems(list1, list2):
         return -1
     return [np.min([list1[i], list2[i]]) for i in range(len(list1))]
 
-def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> (vectorized_map_pb2.Polyline, List[int, int, int], List[int, int, int]):
+def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> (vectorized_map_pb2.Polyline, List[int], List[int]):
     ret = vectorized_map_pb2.Polyline()
     max_pt = [0.0, 0.0, 0.0]
     min_pt = [0.0, 0.0, 0.0]
@@ -133,7 +143,7 @@ def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> (vectorized_m
     return ret, max_pt, min_pt
 
 
-def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLane, List[int, int, int], List[int, int, int]):
+def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLane, List[int], List[int]):
     road_lane = vectorized_map_pb2.RoadLane
     # road_area = vectorized_map_pb2.RoadArea
     # Waymo lane only gives boundary indices and no center indices
@@ -160,7 +170,7 @@ def translate_lane(lane: waymo_map_pb2.LaneCenter) -> (vectorized_map_pb2.RoadLa
     return road_lane, max_point, min_point
 
 
-def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> (vectorized_map_pb2.PedCrosswalk, List[int, int, int], List[int, int, int]):
+def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> (vectorized_map_pb2.PedCrosswalk, List[int], List[int]):
     ret = vectorized_map_pb2.PedCrosswalk()
     ret.polygon, max_pt, min_pt = translate_poly_line(lane.polygon)
     return ret, max_pt, min_pt
