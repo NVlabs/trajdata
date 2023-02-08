@@ -38,11 +38,18 @@ class WaymoScenarios:
         self.name = dataset_name
         self.source_dir = source_dir
         self.split = split
-        self.scene_length = 9
+        if dataset_name in ["training", "validation", "validation_interactive"]:
+            self.scene_length = 9
+        elif dataset_name in ["testing", "testing_interactive"]:
+            self.scene_length = 1
+        elif dataset_name in ["training_20s"]:
+            self.scene_length = 20
+        self.num_scenarios = 0
         if download:
             self.download_dataset()
         if split:
             self.split_scenarios()
+
     def download_dataset(self):
         check_call("snap install google-cloud-sdk --classic".split())
         gsutil = check_output(["which", "gsutil"])
@@ -51,7 +58,6 @@ class WaymoScenarios:
         check_call(download_cmd)
 
     def split_scenarios(self, num_parallel_reads=20, verbose=True):
-        self.scenarios = []
         source_it = pathlib.Path().glob(self.source_dir+'/'+self.name + "/*")
         file_names = [str(file_name) for file_name in source_it if file_name.is_file()]
         if verbose:
@@ -69,11 +75,14 @@ class WaymoScenarios:
             file_name = os.path.join(splitted_dir, self.name+"_splitted_"+str(i)+ ".tfrecords")
             with tf.io.TFRecordWriter(file_name) as file_writer:
                 file_writer.write(data.numpy())
-            # break
             i += 1
         self.num_scenarios = i
         if verbose:
             print(str(i) + " scenarios from " + str(len(file_names)) + " file(s) have been splitted into "+ str(i) + "files")
+
+    def get_filename(self, data_idx):
+        return os.path.join(self.source_dir, self.name+"_splitted", self.name+"_splitted_"+str(data_idx)+ ".tfrecords")
+
 
 def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
     vec_map = vectorized_map_pb2.VectorizedMap()

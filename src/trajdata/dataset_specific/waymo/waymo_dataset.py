@@ -2,14 +2,12 @@ import warnings
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
-
+from typing import Any, Dict, List, Optional, Tuple, Type
 import numpy as np
 import pandas as pd
 import tqdm
-
+import tensorflow as tf
 import waymo_utils
-from waymo_open_dataset.protos.map_pb2 import MapFeature
 from waymo_open_dataset.protos.scenario_pb2 import Scenario
 from waymo_utils import WaymoScenarios, translate_agent_type
 
@@ -82,8 +80,14 @@ class WaymoDataset(RawDataset):
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
             print(f"Loading {self.name} dataset...", flush=True)
-
-        self.dataset_obj = WaymoScenarios(self.metadata.data_dir)
+        dataset_name: str = ""
+        if self.name == "waymo_train":
+            dataset_name = "training"
+        elif self.name == "waymo_val":
+            dataset_name = "validation"
+        elif self.name == "waymo_test":
+            dataset_name = "testing"
+        self.dataset_obj = WaymoScenarios(dataset_name=dataset_name, source_dir=self.metadata.data_dir)
 
     def _get_matching_scenes_from_obj(
             self,
@@ -94,10 +98,10 @@ class WaymoDataset(RawDataset):
         all_scenes_list: List[WaymoSceneRecord] = list()
 
         scenes_list: List[SceneMetadata] = list()
-        for idx, scene_record in enumerate(self.dataset_obj.scenarios):
-            scene_name: str = scene_record.scenario_id
+        for idx in range(self.dataset_obj.num_scenarios):
+            scene_name: str = "scene_"+str(idx)
             scene_split: str = self.metadata.scene_split_map[scene_name]
-            scene_length: int = len(scene_record.timestamps)
+            scene_length: int = self.dataset_obj.scene_length
 
             # Saving all scene records for later caching.
             all_scenes_list.append(WaymoSceneRecord(scene_name, str(scene_length), idx))
@@ -117,12 +121,10 @@ class WaymoDataset(RawDataset):
 
     def get_scene(self, scene_info: SceneMetadata) -> Scene:
         _, name, _, data_idx = scene_info
-        scene_frames: Scenario = self.dataset_obj.scenarios[
-            data_idx
-        ]
+        filename: str = self.dataset_obj.get_filename(data_idx)
         scene_name: str = name
         scene_split: str = self.metadata.scene_split_map[scene_name]
-        scene_length: int = len(Scenario.timestamps_seconds)  # Doing .item() otherwise it'll be a numpy.int64
+        scene_length: int = len(self.dataset_obj.scene_length)
 
         return Scene(
             self.metadata,
@@ -131,7 +133,7 @@ class WaymoDataset(RawDataset):
             scene_split,
             scene_length,
             data_idx,
-            scene_frames,
+            filename
         )
 
     def _get_matching_scenes_from_cache(
@@ -173,7 +175,11 @@ class WaymoDataset(RawDataset):
         agent_presence: List[List[AgentMetadata]] = [
             [] for _ in range(scene.length_timesteps)
         ]
-        scenario = self.dataset_obj.scenarios[scene.raw_data_idx]
+        dataset = tf.data.TFRecordDataset([scene.data_access_info], compression_type='')
+        scenario: Scenario = Scenario()
+        for data in dataset:
+            scenario.ParseFromString(bytearray(data.numpy()))
+            break
         agent_ids = []
         agent_translations = []
         agent_velocities = []
@@ -297,20 +303,24 @@ class WaymoDataset(RawDataset):
 
         return agent_list, agent_presence
 
-
     def cache_map(self,
-                  scene_id: int,
+                  data_idx: int,
                   cache_path: Path,
                   map_cache_class: Type[SceneCache],
                   map_params: Dict[str, Any]):
+        dataset = tf.data.TFRecordDataset([self.dataset_obj.get_filename(data_idx)], compression_type='')
+        scenario: Scenario = Scenario()
+        for data in dataset:
+            scenario.ParseFromString(bytearray(data.numpy()))
+            break
         vector_map_proto: VectorizedMap = waymo_utils.extract_vectorized(
-            map_features=self.dataset_obj.scenarios[scene_id].map_features,
-            map_name=f"{self.name}:{scene_id}")
+            map_features=scenario.map_features,
+            map_name=f"{self.name}:{data_idx}")
         vector_map: VectorMap = VectorMap.from_proto(vector_map_proto, incl_road_lanes=True, incl_ped_crosswalks=True)
 
         vector_map.associate_scene_data(
             waymo_utils.extract_traffic_lights(
-                dynamic_states=self.dataset_obj.scenarios[scene_id].dynamic_map_states))
+                dynamic_states=scenario.dynamic_map_states))
         map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)
 
     def cache_maps(
@@ -319,5 +329,5 @@ class WaymoDataset(RawDataset):
             map_cache_class: Type[SceneCache],
             map_params: Dict[str, Any],
     ) -> None:
-        for i in tqdm.trange(len(self.dataset_obj.scenarios)):
+        for i in tqdm.trange(self.dataset_obj.num_scenarios):
             self.cache_map(i, cache_path, map_cache_class, map_params)
