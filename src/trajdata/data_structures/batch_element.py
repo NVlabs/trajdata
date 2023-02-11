@@ -251,17 +251,17 @@ class AgentBatchElement:
         self,
         robot_info: AgentMetadata,
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> np.ndarray:
-        robot_curr_np: np.ndarray = self.cache.get_state(robot_info.name, self.scene_ts)
+    ) -> StateArray:
+        robot_curr_np: StateArray = self.cache.get_state(robot_info.name, self.scene_ts)
         # robot_fut_extents_np,
         (
             robot_fut_np,
             _,
         ) = self.cache.get_agent_future(robot_info, self.scene_ts, future_sec)
 
-        robot_curr_and_fut_np: np.ndarray = np.concatenate(
+        robot_curr_and_fut_np: StateArray = np.concatenate(
             (robot_curr_np[np.newaxis, :], robot_fut_np), axis=0
-        )
+        ).view(self.cache.obs_type)
         return robot_curr_and_fut_np
 
     def get_agent_map_patch(self, patch_params: Dict[str, int]) -> RasterizedMapPatch:

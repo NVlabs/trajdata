@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -67,7 +67,7 @@ class AgentBatch:
         for val in vars(self).keys():
             tensor_val = getattr(self, val)
             if val not in excl_vals and tensor_val is not None:
-                tensor_val: Tensor
+                tensor_val: Union[Tensor, StateTensor]
                 setattr(self, val, tensor_val.to(device, non_blocking=True))
 
         for key, val in self.extras.items():

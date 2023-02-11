@@ -3,8 +3,10 @@ from collections import defaultdict
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from trajdata.data_structures.agent import AgentType
+from trajdata.data_structures.batch import AgentBatch
 from trajdata.data_structures.batch_element import AgentBatchElement, SceneBatchElement
 from trajdata.data_structures.state import NP_STATE_TYPES, TORCH_STATE_TYPES
 from trajdata.dataset import UnifiedDataset
@@ -22,10 +24,8 @@ class TestStateTensor(unittest.TestCase):
         c = AgentObsTensor(torch.rand(5, 9))
 
     def test_class_propagation(self):
-        # TODO(bivanovic): We want to test the following commented code, but...
-        # https://github.com/pytorch/pytorch/issues/47051
-        # a = AgentStateTensor(torch.rand(2, 8))
-        # self.assertTrue(isinstance(a.to("cpu"), AgentStateTensor))
+        a = AgentStateTensor(torch.rand(2, 8))
+        self.assertTrue(isinstance(a.to("cpu"), AgentStateTensor))
 
         a = AgentStateTensor(torch.rand(2, 8))
         self.assertTrue(isinstance(a.cpu(), AgentStateTensor))
@@ -57,11 +57,46 @@ class TestStateTensor(unittest.TestCase):
         hv = a.heading_vector
         self.assertTrue(torch.allclose(torch.atan2(hv[..., 1], hv[..., 0])[:, None], h))
 
+    def test_long_lat_velocity(self):
+        a = AgentStateTensor(torch.rand(8))
+        velocity = a[3:5]
+        h = a[7]
+        lonlat_v = a.as_format("v_lon,v_lat")
+        lonlat_v_correct = (
+            torch.tensor([[np.cos(h), np.sin(h)], [-np.sin(h), np.cos(h)]])[None, ...]
+            @ velocity[..., None]
+        )[..., 0]
+
+        self.assertTrue(torch.allclose(lonlat_v, lonlat_v_correct))
+
+        b = a.as_format("x,y,xd,yd,s,c")
+        s = b[-2]
+        c = b[-1]
+        lonlat_v = b.as_format("v_lon,v_lat")
+        lonlat_v_correct = (
+            torch.tensor([[c, s], [-s, c]])[None, ...] @ velocity[..., None]
+        )[..., 0]
+
+        self.assertTrue(torch.allclose(lonlat_v, lonlat_v_correct))
+
+    def test_long_lat_conversion(self):
+        a = AgentStateTensor(torch.rand(2, 8))
+        b = a.as_format("xd,yd,h")
+        c = b.as_format("v_lon,v_lat,h")
+        d = c.as_format("xd,yd,h")
+        self.assertTrue(torch.allclose(b, d))
+
     def test_as_format(self):
         a = AgentStateTensor(torch.rand(2, 8))
         b = a.as_format("x,y,z,xd,yd,xdd,ydd,s,c")
         self.assertTrue(isinstance(b, AgentObsTensor))
         self.assertTrue(torch.allclose(a, b.as_format(a._format)))
+
+    def test_as_tensor(self):
+        a = AgentStateTensor(torch.rand(2, 8))
+        b = a.as_tensor()
+        self.assertTrue(isinstance(b, torch.Tensor))
+        self.assertFalse(isinstance(b, AgentStateTensor))
 
     def test_tensor_ops(self):
         a = AgentStateTensor(torch.rand(2, 8))
@@ -99,11 +134,46 @@ class TestStateArray(unittest.TestCase):
         hv = a.heading_vector
         self.assertTrue(np.allclose(np.arctan2(hv[..., 1], hv[..., 0])[:, None], h))
 
+    def test_long_lat_velocity(self):
+        a = np.random.rand(8).view(AgentStateArray)
+        velocity = a[3:5]
+        h = a[7]
+        lonlat_v = a.as_format("v_lon,v_lat")
+        lonlat_v_correct = (
+            np.array([[np.cos(h), np.sin(h)], [-np.sin(h), np.cos(h)]])[None, ...]
+            @ velocity[..., None]
+        )[..., 0]
+
+        self.assertTrue(np.allclose(lonlat_v, lonlat_v_correct))
+
+        b = a.as_format("x,y,xd,yd,s,c")
+        s = b[-2]
+        c = b[-1]
+        lonlat_v = b.as_format("v_lon,v_lat")
+        lonlat_v_correct = (
+            np.array([[c, s], [-s, c]])[None, ...] @ velocity[..., None]
+        )[..., 0]
+
+        self.assertTrue(np.allclose(lonlat_v, lonlat_v_correct))
+
+    def test_long_lat_conversion(self):
+        a = np.random.rand(2, 8).view(AgentStateArray)
+        b = a.as_format("xd,yd,h")
+        c = b.as_format("v_lon,v_lat,h")
+        d = c.as_format("xd,yd,h")
+        self.assertTrue(np.allclose(b, d))
+
     def test_as_format(self):
         a = np.random.rand(2, 8).view(AgentStateArray)
         b = a.as_format("x,y,z,xd,yd,xdd,ydd,s,c")
         self.assertTrue(isinstance(b, AgentObsArray))
         self.assertTrue(np.allclose(a, b.as_format(a._format)))
+
+    def test_as_ndarray(self):
+        a: AgentStateArray = np.random.rand(2, 8).view(AgentStateArray)
+        b = a.as_ndarray()
+        self.assertTrue(isinstance(b, np.ndarray))
+        self.assertFalse(isinstance(b, AgentStateArray))
 
     def test_tensor_ops(self):
         a = np.random.rand(2, 8).view(AgentStateArray)
@@ -114,6 +184,142 @@ class TestStateArray(unittest.TestCase):
 
 
 class TestDataset(unittest.TestCase):
+    def test_dataloading(self):
+        dataset = UnifiedDataset(
+            desired_data=["lyft_sample-mini_val"],
+            centric="agent",
+            desired_dt=0.1,
+            history_sec=(3.2, 3.2),
+            future_sec=(4.8, 4.8),
+            only_predict=[AgentType.VEHICLE],
+            agent_interaction_distances=defaultdict(lambda: 30.0),
+            incl_robot_future=True,
+            incl_raster_map=True,
+            standardize_data=False,
+            raster_map_params={
+                "px_per_m": 2,
+                "map_size_px": 224,
+                "offset_frac_xy": (-0.5, 0.0),
+            },
+            num_workers=4,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+            },
+        )
+
+        dataloader = DataLoader(
+            dataset,
+            batch_size=4,
+            shuffle=True,
+            collate_fn=dataset.get_collate_fn(),
+            num_workers=0,
+        )
+
+        i = 0
+        batch: AgentBatch
+        for batch in dataloader:
+            i += 1
+
+            batch.to("cuda")
+
+            self.assertIsInstance(batch.curr_agent_state, dataset.torch_state_type)
+            self.assertIsInstance(batch.agent_hist, dataset.torch_obs_type)
+            self.assertIsInstance(batch.agent_fut, dataset.torch_obs_type)
+            self.assertIsInstance(batch.robot_fut, dataset.torch_obs_type)
+
+            if i == 5:
+                break
+
+    def test_dict_dataloading(self):
+        dataset = UnifiedDataset(
+            desired_data=["lyft_sample-mini_val"],
+            centric="agent",
+            desired_dt=0.1,
+            history_sec=(3.2, 3.2),
+            future_sec=(4.8, 4.8),
+            only_predict=[AgentType.VEHICLE],
+            agent_interaction_distances=defaultdict(lambda: 30.0),
+            incl_robot_future=True,
+            incl_raster_map=True,
+            standardize_data=False,
+            raster_map_params={
+                "px_per_m": 2,
+                "map_size_px": 224,
+                "offset_frac_xy": (-0.5, 0.0),
+            },
+            num_workers=4,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+            },
+        )
+
+        dataloader = DataLoader(
+            dataset,
+            batch_size=4,
+            shuffle=True,
+            collate_fn=dataset.get_collate_fn(return_dict=True),
+            num_workers=0,
+        )
+
+        i = 0
+        for batch in dataloader:
+            i += 1
+
+            self.assertIsInstance(batch["curr_agent_state"], dataset.torch_state_type)
+            self.assertIsInstance(batch["agent_hist"], dataset.torch_obs_type)
+            self.assertIsInstance(batch["agent_fut"], dataset.torch_obs_type)
+            self.assertIsInstance(batch["robot_fut"], dataset.torch_obs_type)
+
+            if i == 5:
+                break
+
+        dataset = UnifiedDataset(
+            desired_data=["lyft_sample-mini_val"],
+            centric="scene",
+            desired_dt=0.1,
+            history_sec=(3.2, 3.2),
+            future_sec=(4.8, 4.8),
+            only_predict=[AgentType.VEHICLE],
+            agent_interaction_distances=defaultdict(lambda: 30.0),
+            incl_robot_future=True,
+            incl_raster_map=True,
+            standardize_data=False,
+            raster_map_params={
+                "px_per_m": 2,
+                "map_size_px": 224,
+                "offset_frac_xy": (-0.5, 0.0),
+            },
+            num_workers=4,
+            verbose=True,
+            data_dirs={  # Remember to change this to match your filesystem!
+                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+            },
+        )
+
+        dataloader = DataLoader(
+            dataset,
+            batch_size=4,
+            shuffle=True,
+            collate_fn=dataset.get_collate_fn(return_dict=True),
+            num_workers=0,
+        )
+
+        i = 0
+        for batch in dataloader:
+            i += 1
+
+            self.assertIsInstance(
+                batch["centered_agent_state"], dataset.torch_state_type
+            )
+            self.assertIsInstance(batch["agent_hist"], dataset.torch_obs_type)
+            self.assertIsInstance(batch["agent_fut"], dataset.torch_obs_type)
+            self.assertIsInstance(batch["robot_fut"], dataset.torch_obs_type)
+
+            if i == 5:
+                break
+
     def test_default_datatypes_agent(self):
         dataset = UnifiedDataset(
             desired_data=["lyft_sample-mini_val"],
@@ -131,7 +337,7 @@ class TestDataset(unittest.TestCase):
                 "map_size_px": 224,
                 "offset_frac_xy": (-0.5, 0.0),
             },
-            num_workers=36,
+            num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
                 "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
@@ -144,7 +350,7 @@ class TestDataset(unittest.TestCase):
         self.assertIsInstance(elem.agent_future_np, dataset.np_obs_type)
         self.assertIsInstance(elem.robot_future_np, dataset.np_obs_type)
 
-    def test_default_datatypes_agent(self):
+    def test_default_datatypes_scene(self):
         dataset = UnifiedDataset(
             desired_data=["lyft_sample-mini_val"],
             centric="scene",
@@ -161,7 +367,7 @@ class TestDataset(unittest.TestCase):
                 "map_size_px": 224,
                 "offset_frac_xy": (-0.5, 0.0),
             },
-            num_workers=36,
+            num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
                 "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",

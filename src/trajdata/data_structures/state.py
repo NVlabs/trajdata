@@ -9,12 +9,10 @@ any np/torch operation on a State subclass will drop the format metadata.
 TODO: we could make this more robust by making exceptions for operations which 
 preserve the semantic meanings of the elements.
 TODO: implement setters for all properties
-
-If you want to add state column info to an array
 """
 from abc import abstractclassmethod
 from collections import defaultdict
-from typing import Callable, ClassVar, Dict, List, Type, TypeVar
+from typing import Callable, ClassVar, Dict, List, Set, Type, TypeVar
 
 import numpy as np
 import torch
@@ -24,8 +22,8 @@ STATE_ELEMS_REQUIREMENTS = {
     "x": None,  # x position in world frame (m)
     "y": None,  # y position in world frame (m)
     "z": None,  # z position in world frame (m)
-    "xd": None,  # x velocity in world frame (m/s)
-    "yd": None,  # y velocity in world frame (m/s)
+    "xd": ("x_component", "v_lon", "v_lat", "c", "s"),  # x vel in world frame (m/s)
+    "yd": ("y_component", "v_lon", "v_lat", "c", "s"),  # y vel in world frame (m/s)
     "zd": None,  # z velocity in world frame (m/s)
     "xdd": None,  # x acceleration in world frame (m/s^2)
     "ydd": None,  # y acceleration in world frame (m/s^2)
@@ -34,9 +32,48 @@ STATE_ELEMS_REQUIREMENTS = {
     "dh": None,  # heading rate (rad)
     "c": ("cos", "h"),  # cos(h)
     "s": ("sin", "h"),  # sin(h)
+    "v_lon": ("lon_component", "xd", "yd", "c", "s"),  # longitudinal velocity
+    "v_lat": ("lat_component", "xd", "yd", "c", "s"),  # latitudinal velocity
 }
 
+# How many levels deep we'll try to check if requirements for certain attributes
+# themselves need to be computed and are not directly available
+MAX_RECURSION_LEVELS = 2
+
+
 Array = TypeVar("Array", np.ndarray, torch.Tensor)
+
+
+def lon_component(x, y, c, s):
+    """
+    Returns magnitude of x,y that is parallel
+    to unit vector c,s
+    """
+    return x * c + y * s
+
+
+def lat_component(x, y, c, s):
+    """
+    Returns magnitude of x,y that is orthogonal to
+    unit vector c,s (i.e., parallel to -s,c)
+    """
+    return -x * s + y * c
+
+
+def x_component(long, lat, c, s):
+    """
+    Returns x component given long and lat components
+    and cos and sin of heading
+    """
+    return long * c - lat * s
+
+
+def y_component(long, lat, c, s):
+    """
+    Returns y component given long and lat components
+    and cos and sin of heading
+    """
+    return long * s + lat * c
 
 
 class State:
@@ -132,34 +169,45 @@ class State:
         else:
             return result
 
-    def _compute_attr(self, attr: str):
+    def _compute_attr(self, attr: str, _depth: int = MAX_RECURSION_LEVELS):
         """
         Tries to compute attr that isn't directly part of the tensor
         given the information available.
 
+        if a requirement for the attr isn't directly part of the tensor
+        either, then we recurse to compute that attribute.
+        _depth controls the depth of recursion
+
         If impossible raises ValueError
         """
+        if _depth == 0:
+            raise RecursionError
         try:
             formula = STATE_ELEMS_REQUIREMENTS[attr]
             if formula is None:
                 raise KeyError(f"No formula for {attr}")
             func_name, *requirements = formula
             func = self._FUNCS[func_name]
-            args = [self[..., self._format_dict[req]] for req in requirements]
+            args = [self.get_attr(req, _depth=_depth - 1) for req in requirements]
         except KeyError as ke:
             raise ValueError(
                 f"{attr} cannot be computed from available data at the current timestep."
             )
+        except RecursionError as re:
+            raise ValueError(
+                f"{attr} cannot be computed: Recursion depth exceeded when trying to computerequirements"
+            )
         return func(*args)
 
-    def get_attr(self, attr: str):
+    def get_attr(self, attr: str, _depth: int = MAX_RECURSION_LEVELS):
         """
         Returns slice of tensor corresponding to attr
+
         """
         if attr in self._format_dict:
             return self[..., self._format_dict[attr]]
         else:
-            return self._compute_attr(attr)
+            return self._compute_attr(attr, _depth=_depth)
 
     def set_attr(self, attr: str, val: Tensor):
         if attr in self._format_dict:
@@ -198,11 +246,14 @@ class State:
 
 
 class StateArray(State, np.ndarray):
-
     _FUNCS = {
         "cos": np.cos,
         "sin": np.sin,
         "arctan": np.arctan2,
+        "lon_component": lon_component,
+        "lat_component": lat_component,
+        "x_component": x_component,
+        "y_component": y_component,
     }
 
     def __str__(self) -> str:
@@ -256,6 +307,17 @@ class StateArray(State, np.ndarray):
         """
         return super().__getitem__(key)
 
+    def as_ndarray(self) -> np.ndarray:
+        """Convenience function to convert to default ndarray type
+        Applying np operations to StateArrays can silently convert them
+        to basic np.ndarrays, so making this conversion explicit
+        can improve code readability.
+
+        Returns:
+            np.ndarray: pointing to same data as self
+        """
+        return self.view(np.ndarray)
+
     @classmethod
     def from_array(cls, array: Array, format: str):
         return array.view(NP_STATE_TYPES[format])
@@ -279,7 +341,33 @@ class StateTensor(State, Tensor):
         "cos": torch.cos,
         "sin": torch.sin,
         "arctan": torch.arctan2,
+        "lon_component": lon_component,
+        "lat_component": lat_component,
+        "x_component": x_component,
+        "y_component": y_component,
     }
+
+    CAPTURED_FUNCS: Set[Callable] = {
+        Tensor.cpu,
+        Tensor.cuda,
+        Tensor.add,
+        Tensor.add_,
+        Tensor.__deepcopy__,
+    }
+
+    @classmethod
+    def new_empty(cls, *args, **kwargs):
+        return torch.empty(*args, **kwargs).as_subclass(cls)
+
+    def clone(self, *args, **kwargs):
+        return super().clone(*args, **kwargs).as_subclass(type(self))
+
+    def to(self, *args, **kwargs):
+        new_obj = self.__class__()
+        tempTensor = super().to(*args, **kwargs)
+        new_obj.data = tempTensor.data
+        new_obj.requires_grad = tempTensor.requires_grad
+        return new_obj
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -290,9 +378,7 @@ class StateTensor(State, Tensor):
         new_class = Tensor
         result = super().__torch_function__(func, types, args, kwargs)
 
-        # TODO(bivanovic): Ideally we would have Tensor.to here as well, but...
-        # https://github.com/pytorch/pytorch/issues/47051
-        if func in {Tensor.cpu, Tensor.cuda, Tensor.add, Tensor.add_}:
+        if func in StateTensor.CAPTURED_FUNCS:
             new_class = cls
 
         if func == Tensor.__getitem__:
@@ -320,6 +406,17 @@ class StateTensor(State, Tensor):
             result = result.view(NP_STATE_TYPES[cls._format])
 
         return result
+
+    def as_tensor(self) -> Tensor:
+        """Convenience function to convert to default tensor type
+        Applying torch operations to StateTensors can silently convert them
+        to basic torch.Tensors, so making this conversion explicit
+        can improve code readability.
+
+        Returns:
+            Tensor: pointing to same data as self
+        """
+        return self.as_subclass(Tensor)
 
     @classmethod
     def from_numpy(cls, state: StateArray, **kwargs):

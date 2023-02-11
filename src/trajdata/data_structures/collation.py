@@ -491,14 +491,18 @@ def agent_collate_fn(
             # agent history state dimension (presumably they'll be the same
             # since they're obtained from the same cached data source).
             neighbor_histories.append(
-                torch.full((0, elem.agent_history_np.shape[-1]), np.nan)
+                torch.full(
+                    (0, elem.agent_history_np.shape[-1]), np.nan, dtype=torch.float
+                )
             )
             neighbor_history_extents.append(
                 torch.full((0, elem.agent_history_extent_np.shape[-1]), np.nan)
             )
 
             neighbor_futures.append(
-                torch.full((0, elem.agent_future_np.shape[-1]), np.nan)
+                torch.full(
+                    (0, elem.agent_future_np.shape[-1]), np.nan, dtype=torch.float
+                )
             )
             neighbor_future_extents.append(
                 torch.full((0, elem.agent_future_extent_np.shape[-1]), np.nan)
@@ -632,7 +636,9 @@ def agent_collate_fn(
         neighbor_types_t: Tensor = torch.full((batch_size, 0), np.nan)
 
         neighbor_histories_t: AgentObsTensor = torch.full(
-            (batch_size, 0, max_neigh_history_len, agent_history_t.shape[-1]), np.nan
+            (batch_size, 0, max_neigh_history_len, agent_history_t.shape[-1]),
+            np.nan,
+            dtype=torch.float,
         ).as_subclass(AgentObsTensor)
         neighbor_history_extents_t: Tensor = torch.full(
             (batch_size, 0, max_neigh_history_len, agent_history_extent_t.shape[-1]),
@@ -640,7 +646,9 @@ def agent_collate_fn(
         )
 
         neighbor_futures_t: AgentObsTensor = torch.full(
-            (batch_size, 0, max_neigh_future_len, agent_future_t.shape[-1]), np.nan
+            (batch_size, 0, max_neigh_future_len, agent_future_t.shape[-1]),
+            np.nan,
+            dtype=torch.float,
         ).as_subclass(AgentObsTensor)
         neighbor_future_extents_t: Tensor = torch.full(
             (batch_size, 0, max_neigh_future_len, agent_future_extent_t.shape[-1]),
@@ -924,9 +932,9 @@ def scene_collate_fn(
         agents_future_extents, num_agents, np.nan, max_agent_num
     )
 
-    centered_agent_state_t = torch.tensor(np.stack(centered_agent_state)).as_subclass(
-        AgentStateTensor
-    )
+    centered_agent_state_t = torch.as_tensor(
+        np.stack(centered_agent_state), dtype=torch.float
+    ).as_subclass(AgentStateTensor)
     agents_types_t = torch.as_tensor(np.concatenate(agents_types))
     agents_types_t = split_pad_crop(
         agents_types_t, num_agents, pad_value=-1, desired_size=max_agent_num
