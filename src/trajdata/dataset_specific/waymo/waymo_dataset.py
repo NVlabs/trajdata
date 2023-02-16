@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import tqdm
 import tensorflow as tf
-import waymo_utils
+from trajdata.dataset_specific.waymo import waymo_utils
 from waymo_open_dataset.protos.scenario_pb2 import Scenario
-from waymo_utils import WaymoScenarios, translate_agent_type
+from trajdata.dataset_specific.waymo.waymo_utils import WaymoScenarios, translate_agent_type
 
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import (
@@ -53,21 +53,21 @@ class WaymoDataset(RawDataset):
 
             # Waymo possibilities are the Cartesian product of these
             dataset_parts = [
-                ("train")
+                ("train",)
             ]
             scene_split_map = defaultdict(partial(const_lambda, const_val="train"))
         elif env_name == "waymo_val":
 
             # Waymo possibilities are the Cartesian product of these
             dataset_parts = [
-                ("val")
+                ("val",)
             ]
             scene_split_map = defaultdict(partial(const_lambda, const_val="val"))
         elif env_name == "waymo_test":
 
             # Waymo possibilities are the Cartesian product of these
             dataset_parts = [
-                ("test")
+                ("test",)
             ]
             scene_split_map = defaultdict(partial(const_lambda, const_val="test"))
         return EnvMetadata(name=env_name,
@@ -121,7 +121,6 @@ class WaymoDataset(RawDataset):
 
     def get_scene(self, scene_info: SceneMetadata) -> Scene:
         _, name, _, data_idx = scene_info
-        filename: str = self.dataset_obj.get_filename(data_idx)
         scene_name: str = name
         scene_split: str = self.metadata.scene_split_map[scene_name]
         scene_length: int = len(self.dataset_obj.scene_length)
@@ -133,7 +132,6 @@ class WaymoDataset(RawDataset):
             scene_split,
             scene_length,
             data_idx,
-            filename
         )
 
     def _get_matching_scenes_from_cache(
@@ -175,7 +173,7 @@ class WaymoDataset(RawDataset):
         agent_presence: List[List[AgentMetadata]] = [
             [] for _ in range(scene.length_timesteps)
         ]
-        dataset = tf.data.TFRecordDataset([scene.data_access_info], compression_type='')
+        dataset = tf.data.TFRecordDataset([self.dataset_obj.get_filename(scene.raw_data_idx)], compression_type='')
         scenario: Scenario = Scenario()
         for data in dataset:
             scenario.ParseFromString(bytearray(data.numpy()))
