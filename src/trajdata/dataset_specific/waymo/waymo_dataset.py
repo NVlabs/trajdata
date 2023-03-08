@@ -123,7 +123,7 @@ class WaymoDataset(RawDataset):
         _, name, _, data_idx = scene_info
         scene_name: str = name
         scene_split: str = self.metadata.scene_split_map[scene_name]
-        scene_length: int = len(self.dataset_obj.scene_length)
+        scene_length: int = self.dataset_obj.scene_length
 
         return Scene(
             self.metadata,
@@ -132,6 +132,7 @@ class WaymoDataset(RawDataset):
             scene_split,
             scene_length,
             data_idx,
+            None
         )
 
     def _get_matching_scenes_from_cache(
@@ -197,28 +198,37 @@ class WaymoDataset(RawDataset):
                 continue
             agent_ml_class.append(agent_type)
             states = track.states
-            translations = np.array([(state.center_x, state.center_y, state.center_z) for state in states], dtype=np.float)
-            velocities = np.array([(state.velocity_x, state.velocity_y) for state in states], dtype=np.float)
-            sizes = [(state.length, state.width, state.height) for state in states]
-            yaws = [state.heading for state in states]
-
+            translations = []
+            velocities = []
+            sizes = []
+            yaws = []
             first_timestep = 0
-            states = track.states
-            for timestep in range(scene.length_timesteps):
-                if states[timestep].valid:
-                    first_timestep = timestep
-                    break
             last_timestep = scene.length_timesteps - 1
-            for timestep in range(scene.length_timesteps):
-                if states[scene.length_timesteps - timestep - 1].valid:
-                    last_timestep = timestep
-                    break
-            translations[first_timestep:last_timestep] = pd.Series(translations[first_timestep:last_timestep]).interpolate().to_numpy()
+            for state in states:
+                if state.valid:
+                    translations.append((state.center_x, state.center_y, state.center_z))
+                    velocities.append((state.velocity_x, state.velocity_y))
+                    sizes.append((state.length, state.width, state.height))
+                    yaws.append(state.heading)
+                else:
+                    translations.append((0, 0, 0))
+                    velocities.append((0, 0))
+                    sizes.append((0, 0, 0))
+                    yaws.append(0)
             agent_translations.extend(translations)
-            velocities[first_timestep:last_timestep] = pd.Series(velocities[first_timestep:last_timestep]).interpolate().to_numpy()
             agent_velocities.extend(velocities)
             agent_sizes.extend(sizes)
             agent_yaws.extend(yaws)
+
+
+            # for timestep in range(scene.length_timesteps):
+            #     if states[timestep].valid:
+            #         first_timestep = timestep
+            #         break
+            # for timestep in range(scene.length_timesteps):
+            #     if states[scene.length_timesteps - timestep - 1].valid:
+            #         last_timestep = timestep
+            #         break
 
             agent_info = AgentMetadata(
                 name=agent_name,
@@ -327,5 +337,5 @@ class WaymoDataset(RawDataset):
             map_cache_class: Type[SceneCache],
             map_params: Dict[str, Any],
     ) -> None:
-        for i in tqdm.trange(self.dataset_obj.num_scenarios):
+        for i in tqdm.trange(3):
             self.cache_map(i, cache_path, map_cache_class, map_params)

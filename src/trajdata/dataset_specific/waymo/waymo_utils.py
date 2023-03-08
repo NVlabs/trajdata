@@ -18,6 +18,18 @@ WAYMO_DATASET_NAMES = ["testing",
                  "training_20s",
                  "validation",
                  "validation_interactive"]
+
+green = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_GO,
+         waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_GO,
+         ]
+red = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_CAUTION,
+       waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_STOP,
+       waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_STOP,
+       waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_CAUTION,
+       waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_FLASHING_STOP,
+       waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_FLASHING_CAUTION,
+       ]
+
 from trajdata.data_structures.agent import (
     Agent,
     AgentMetadata,
@@ -27,18 +39,18 @@ from trajdata.data_structures.agent import (
 )
 
 class WaymoScenarios:
-    def __init__(self, dataset_name, source_dir, download=True, split=True):
+    def __init__(self, dataset_name, source_dir, download=False, split=False):
         if dataset_name not in WAYMO_DATASET_NAMES:
             raise RuntimeError('Wrong dataset name. Please choose name from '+str(WAYMO_DATASET_NAMES))
         self.name = dataset_name
         self.source_dir = source_dir
         self.split = split
         if dataset_name in ["training", "validation", "validation_interactive"]:
-            self.scene_length = 9
+            self.scene_length = 91
         elif dataset_name in ["testing", "testing_interactive"]:
-            self.scene_length = 1
+            self.scene_length = 11
         elif dataset_name in ["training_20s"]:
-            self.scene_length = 20
+            self.scene_length = 201
         self.num_scenarios = 44920
         if download:
             self.download_dataset()
@@ -72,7 +84,7 @@ class WaymoScenarios:
             i += 1
         self.num_scenarios = i
         if verbose:
-            print(str(i) + " scenarios from " + str(len(file_names)) + " file(s) have been splitted into "+ str(i) + "files")
+            print(str(i) + " scenarios from " + str(len(file_names)) + " file(s) have been splitted into " + str(i) + "files")
 
     def get_filename(self, data_idx):
         return os.path.join(self.source_dir, self.name+"_splitted", self.name+"_splitted_"+str(data_idx)+ ".tfrecords")
@@ -81,11 +93,9 @@ class WaymoScenarios:
 def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -> vectorized_map_pb2.VectorizedMap:
     vec_map = vectorized_map_pb2.VectorizedMap()
     vec_map.name = map_name
-    shifted_origin = vectorized_map_pb2.Point()
-    shifted_origin.x = 0.0
-    shifted_origin.y = 0.0
-    shifted_origin.z = 0.0
-    vec_map.shifted_origin.CopyFrom(shifted_origin)
+    vec_map.shifted_origin.x = 0.0
+    vec_map.shifted_origin.y = 0.0
+    vec_map.shifted_origin.z = 0.0
     max_pt = vectorized_map_pb2.Point()
     max_pt.x = 0.0
     max_pt.y = 0.0
@@ -106,11 +116,9 @@ def extract_vectorized(map_features: List[waymo_map_pb2.MapFeature], map_name) -
         new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
         new_element.id = bytes(map_feature.id)
         if map_feature.WhichOneof("feature_data") == "lane":
-            road_lane, temp_max_pt, temp_min_pt = translate_lane(map_feature.lane, boundaries)
-            new_element.road_lane.CopyFrom(road_lane)
+            temp_max_pt, temp_min_pt = translate_lane(new_element.road_lane, map_feature.lane, boundaries)
         elif map_feature.WhichOneof("feature_data") == "crosswalk":
-            ped_crosswalk, temp_max_pt, temp_min_pt = translate_crosswalk(map_feature.crosswalk)
-            new_element.ped_crosswalk.CopyFrom(ped_crosswalk)
+            temp_max_pt, temp_min_pt = translate_crosswalk(new_element.ped_crosswalk, map_feature.crosswalk)
         else:
             continue
         max_pt.x, max_pt.y, max_pt.z = get_larger_elems([max_pt.x, max_pt.y, max_pt.z], temp_max_pt)
@@ -144,65 +152,60 @@ def get_smaller_elems(list1, list2):
     return [np.min([list1[i], list2[i]]) for i in range(len(list1))]
 
 
-def translate_poly_line(polyline: List[waymo_map_pb2.MapPoint]) -> (vectorized_map_pb2.Polyline, List[int], List[int]):
-    ret = vectorized_map_pb2.Polyline()
-    max_pt = [0.0, 0.0, 0.0]
-    min_pt = [0.0, 0.0, 0.0]
-    for idx, point in enumerate(polyline):
-        if idx == 0:
-            ret.dx_mm.append(round(point.x * 100))
-            ret.dy_mm.append(round(point.y * 100))
-            ret.dz_mm.append(round(point.z * 100))
-        else:
-            ret.dx_mm.append(round(point.x * 100) - ret.dx_mm[idx - 1])
-            ret.dy_mm.append(round(point.y * 100) - ret.dy_mm[idx - 1])
-            ret.dz_mm.append(round(point.z * 100) - ret.dz_mm[idx - 1])
-        ret.h_rad.append(np.arctan(point.y / point.x))
-        max_pt = get_larger_elems(max_pt, [point.x, point.y, point.z])
-        min_pt = get_smaller_elems(min_pt, [point.x, point.y, point.z])
-    return ret, max_pt, min_pt
+def translate_poly_line(ret: vectorized_map_pb2.Polyline, polyline: List[waymo_map_pb2.MapPoint]) -> (List[float], List[float]):
+    points = [[point.x, point.y, point.z] for point in polyline]
+    shifted_points = [[0.0, 0.0, 0.0]] + points
+    shifted_points.pop(-1)
+
+    points = np.array(points)
+    shifted_points = np.array(shifted_points)
+    max_pt = np.max(points, axis=0)
+    min_pt = np.min(points, axis=0)
+    ret_polyline = (np.array(points) - np.array(shifted_points)) * 1000
+    ret_dx = (ret_polyline[:, 0])
+    ret_dy = (ret_polyline[:, 1])
+    ret_dz = (ret_polyline[:, 2])
+    ret_h = np.arctan(ret_dx/ret_dy)
+    ret.dx_mm.extend(ret_dx.astype(int).tolist())
+    ret.dy_mm.extend(ret_dy.astype(int).tolist())
+    ret.dz_mm.extend(ret_dz.astype(int).tolist())
+    ret.h_rad.extend(ret_h)
+
+    return max_pt, min_pt
 
 
-def translate_lane(lane: waymo_map_pb2.LaneCenter, boundaries: Dict) -> (vectorized_map_pb2.RoadLane, List[int], List[int]):
-    road_lane = vectorized_map_pb2.RoadLane()
-    center, center_max, center_min = translate_poly_line(lane.polyline)
+def translate_lane(road_lane: vectorized_map_pb2.RoadLane, lane: waymo_map_pb2.LaneCenter, boundaries: Dict) -> (List[float], List[float]):
+    center_max, center_min = translate_poly_line(road_lane.center, lane.polyline)
     left_max = center_max
     right_max = center_max
     left_min = center_min
     right_min = center_min
-    road_lane.center.CopyFrom(center)
     if lane.left_boundaries:
         left_boundary_map_pts: List[waymo_map_pb2.MapPoint] = []
 
         for left_boundary in lane.left_boundaries:
             left_boundary_map_pts.extend(boundaries[left_boundary.boundary_feature_id])
-        left_boundary, left_max, left_min = translate_poly_line(left_boundary_map_pts)
-        road_lane.left_boundary.CopyFrom(left_boundary)
+        left_max, left_min = translate_poly_line(road_lane.left_boundary, left_boundary_map_pts)
     if lane.right_boundaries:
         right_boundary_map_pts: List[waymo_map_pb2.MapPoint] = []
         for right_boundary in lane.right_boundaries:
             right_boundary_map_pts.extend(boundaries[right_boundary.boundary_feature_id])
-        right_boundary, right_max, right_min = translate_poly_line(right_boundary_map_pts)
-        road_lane.right_boundary.CopyFrom(right_boundary)
+        right_max, right_min = translate_poly_line(road_lane.right_boundary, right_boundary_map_pts)
 
-    for entry_lane in lane.entry_lanes:
-        road_lane.entry_lanes.append(bytes(entry_lane))
-    for exit_lane in lane.exit_lanes:
-        road_lane.exit_lanes.append(bytes(exit_lane))
+    road_lane.entry_lanes.extend(np.array(lane.entry_lanes).astype(bytes).tolist())
+    road_lane.exit_lanes.extend(np.array(lane.exit_lanes).astype(bytes).tolist())
     for neighbor in lane.left_neighbors:
         road_lane.adjacent_lanes_left.append(bytes(neighbor.feature_id))
     for neighbor in lane.right_neighbors:
         road_lane.adjacent_lanes_right.append(bytes(neighbor.feature_id))
-    max_point = [np.max([center_max[i], left_max[i], right_max[i]]) for i in range(3)]
-    min_point = [np.min([center_min[i], left_min[i], right_min[i]]) for i in range(3)]
-    return road_lane, max_point, min_point
+    max_point = np.max([center_max, left_max, right_max], axis=0)
+    min_point = np.min([center_min, left_min, right_min], axis=0)
+    return max_point, min_point
 
 
-def translate_crosswalk(lane: waymo_map_pb2.Crosswalk) -> (vectorized_map_pb2.PedCrosswalk, List[int], List[int]):
-    ret = vectorized_map_pb2.PedCrosswalk()
-    polygon, max_pt, min_pt = translate_poly_line(lane.polygon)
-    ret.polygon.CopyFrom(polygon)
-    return ret, max_pt, min_pt
+def translate_crosswalk(ret: vectorized_map_pb2.PedCrosswalk, lane: waymo_map_pb2.Crosswalk) -> (List[int], List[int]):
+    max_pt, min_pt = translate_poly_line(ret.polygon, lane.polygon)
+    return max_pt, min_pt
 
 
 def extract_traffic_lights(dynamic_states: List[scenario_pb2.DynamicMapState]) -> Dict[Tuple[int, int], TrafficLightStatus]:
@@ -217,16 +220,6 @@ def translate_traffic_state(state: waymo_map_pb2.TrafficSignalLaneState.State) -
     # The traffic light type doesn't align between waymo and trajdata,
     # but I think trajdata TrafficLightStatus should include yellow light
     # for now I let caution = red
-    green = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_GO,
-             waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_GO,
-             ]
-    red = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_CAUTION,
-           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_STOP,
-           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_STOP,
-           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_CAUTION,
-           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_FLASHING_STOP,
-           waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_FLASHING_CAUTION,
-           ]
     if state in green:
         return TrafficLightStatus.GREEN
     if state in red:
