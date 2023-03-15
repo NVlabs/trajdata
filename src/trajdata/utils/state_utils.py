@@ -126,7 +126,7 @@ def transform_from_frame(
     attributes = state._format_dict.keys()
 
     frame_heading = frame_state.heading[..., 0]
-    if rot_mat is not None:
+    if rot_mat is None:
         rot_mat = rotation_matrix(frame_heading)
 
     if "x" in attributes and "y" in attributes:

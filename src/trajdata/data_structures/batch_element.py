@@ -546,6 +546,7 @@ class SceneBatchElement:
                 offset_xy,
                 heading[i],
                 return_rgb,
+                rot_pad_factor=sqrt(2),
                 no_map_val=no_map_fill_val,
             )
             map_patches.append(
