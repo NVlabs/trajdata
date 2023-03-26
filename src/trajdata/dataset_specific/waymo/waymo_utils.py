@@ -3,6 +3,7 @@ import pathlib
 from typing import Dict, Final, List, Tuple
 from subprocess import check_call, check_output
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
 from waymo_open_dataset.protos import map_pb2 as waymo_map_pb2
@@ -19,10 +20,15 @@ WAYMO_DATASET_NAMES = ["testing",
                  "validation",
                  "validation_interactive"]
 
-green = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_GO,
+TRAIN_SCENE_LENGTH = 91
+VAL_SCENE_LENGTH = 91
+TEST_SCENE_LENGTH = 11
+TRAIN_20S_SCENE_LENGTH = 201
+
+GREEN = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_GO,
          waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_GO,
          ]
-red = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_CAUTION,
+RED = [waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_CAUTION,
        waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_ARROW_STOP,
        waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_STOP,
        waymo_map_pb2.TrafficSignalLaneState.State.LANE_STATE_CAUTION,
@@ -38,24 +44,29 @@ from trajdata.data_structures.agent import (
     VariableExtent,
 )
 
+
 class WaymoScenarios:
     def __init__(self, dataset_name, source_dir, download=False, split=False):
         if dataset_name not in WAYMO_DATASET_NAMES:
-            raise RuntimeError('Wrong dataset name. Please choose name from '+str(WAYMO_DATASET_NAMES))
+            raise RuntimeError('Wrong dataset name. Please choose name from ' + str(WAYMO_DATASET_NAMES))
         self.name = dataset_name
         self.source_dir = source_dir
         self.split = split
-        if dataset_name in ["training", "validation", "validation_interactive"]:
-            self.scene_length = 91
+        if dataset_name in ["training"]:
+            self.scene_length = TRAIN_SCENE_LENGTH
+        elif dataset_name in ["validation", "validation_interactive"]:
+            self.scene_length = VAL_SCENE_LENGTH
         elif dataset_name in ["testing", "testing_interactive"]:
-            self.scene_length = 11
+            self.scene_length = TEST_SCENE_LENGTH
         elif dataset_name in ["training_20s"]:
-            self.scene_length = 201
-        self.num_scenarios = 44920
+            self.scene_length = TRAIN_20S_SCENE_LENGTH
         if download:
             self.download_dataset()
         if split:
             self.split_scenarios()
+        else:
+            self.num_scenarios = len(os.listdir(os.path.join(
+                self.source_dir, self.name+"_splitted")))
 
     def download_dataset(self):
         # check_call("snap install google-cloud-sdk --classic".split())
@@ -220,8 +231,18 @@ def translate_traffic_state(state: waymo_map_pb2.TrafficSignalLaneState.State) -
     # The traffic light type doesn't align between waymo and trajdata,
     # but I think trajdata TrafficLightStatus should include yellow light
     # for now I let caution = red
-    if state in green:
+    if state in GREEN:
         return TrafficLightStatus.GREEN
-    if state in red:
+    if state in RED:
         return TrafficLightStatus.RED
     return TrafficLightStatus.UNKNOWN
+
+
+def interpolate_array(data: np.array) -> np.array:
+    interpolated_series = pd.Series(data)
+    first_non_zero = interpolated_series.ne(0).idxmax()
+    last_non_zero = interpolated_series.ne(0)[::-1].idxmax()
+    # Apply linear interpolation to the internal zeros
+    interpolated_series[first_non_zero:last_non_zero] = \
+        interpolated_series[first_non_zero:last_non_zero].replace(0, np.nan).interpolate()
+    return interpolated_series.values

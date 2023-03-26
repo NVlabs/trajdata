@@ -9,7 +9,7 @@ import tqdm
 import tensorflow as tf
 from trajdata.dataset_specific.waymo import waymo_utils
 from waymo_open_dataset.protos.scenario_pb2 import Scenario
-from trajdata.dataset_specific.waymo.waymo_utils import WaymoScenarios, translate_agent_type
+from trajdata.dataset_specific.waymo.waymo_utils import WaymoScenarios, translate_agent_type, interpolate_array
 
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import (
@@ -245,13 +245,23 @@ class WaymoDataset(RawDataset):
                 agents_to_remove.append(agent_name)
 
         agent_ids = np.repeat(agent_ids, scene.length_timesteps)
+        agent_ml_class = np.repeat(agent_ml_class, scene.length_timesteps)
 
         agent_translations = np.array(agent_translations)
         agent_velocities = np.array(agent_velocities)
         agent_sizes = np.array(agent_sizes)
-
-        agent_ml_class = np.repeat(agent_ml_class, scene.length_timesteps)
         agent_yaws = np.array(agent_yaws)
+        for i in range(agent_translations.shape[1]):
+            agent_translations[:, i] = interpolate_array(agent_translations[:, i])
+        for i in range(agent_velocities.shape[1]):
+            agent_velocities[:, i] = interpolate_array(agent_velocities[:, i])
+        for i in range(agent_sizes.shape[1]):
+            agent_sizes[:, i] = interpolate_array(agent_sizes[:, i])
+        for i in range(agent_yaws.shape[1]):
+            agent_yaws[:, i] = interpolate_array(agent_yaws[:, i])
+
+
+
         all_agent_data = np.concatenate(
             [
                 agent_translations,
