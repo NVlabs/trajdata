@@ -176,7 +176,7 @@ def translate_poly_line(ret: vectorized_map_pb2.Polyline, polyline: List[waymo_m
     ret_dx = (ret_polyline[:, 0])
     ret_dy = (ret_polyline[:, 1])
     ret_dz = (ret_polyline[:, 2])
-    ret_h = np.arctan(ret_dx/ret_dy)
+    ret_h = np.arctan2(ret_dy, ret_dx)
     ret.dx_mm.extend(ret_dx.astype(int).tolist())
     ret.dy_mm.extend(ret_dy.astype(int).tolist())
     ret.dz_mm.extend(ret_dz.astype(int).tolist())
@@ -240,9 +240,8 @@ def translate_traffic_state(state: waymo_map_pb2.TrafficSignalLaneState.State) -
 
 def interpolate_array(data: np.array) -> np.array:
     interpolated_series = pd.Series(data)
-    first_non_zero = interpolated_series.ne(0).idxmax()
-    last_non_zero = interpolated_series.ne(0)[::-1].idxmax()
-    # Apply linear interpolation to the internal zeros
-    interpolated_series[first_non_zero:last_non_zero] = \
-        interpolated_series[first_non_zero:last_non_zero].replace(0, np.nan).interpolate()
+    first_valid = interpolated_series.first_valid_index()
+    last_valid = interpolated_series.last_valid_index()
+    interpolated_series[first_valid:last_valid] = \
+        interpolated_series[first_valid:last_valid].interpolate()
     return interpolated_series.values

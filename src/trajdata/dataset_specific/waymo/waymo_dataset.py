@@ -202,8 +202,6 @@ class WaymoDataset(RawDataset):
             velocities = []
             sizes = []
             yaws = []
-            first_timestep = 0
-            last_timestep = scene.length_timesteps - 1
             for state in states:
                 if state.valid:
                     translations.append((state.center_x, state.center_y, state.center_z))
@@ -211,24 +209,32 @@ class WaymoDataset(RawDataset):
                     sizes.append((state.length, state.width, state.height))
                     yaws.append(state.heading)
                 else:
-                    translations.append((0, 0, 0))
-                    velocities.append((0, 0))
-                    sizes.append((0, 0, 0))
-                    yaws.append(0)
+                    translations.append((np.nan, np.nan, np.nan))
+                    velocities.append((np.nan, np.nan))
+                    sizes.append((np.nan, np.nan, np.nan))
+                    yaws.append(np.nan)
+
+            translations = np.array(translations)
+            velocities = np.array(velocities)
+            sizes = np.array(sizes)
+            yaws = np.array(yaws)
+            first_timestep = pd.Series(translations[:, 0]).first_valid_index()
+            last_timestep = pd.Series(translations[:, 0]).last_valid_index()
+            if not first_timestep or not last_timestep:
+                first_timestep = 0
+                last_timestep = 0
+            if last_timestep - first_timestep != 0:
+                for i in range(translations.shape[1]):
+                    translations[:, i] = interpolate_array(translations[:, i])
+                for i in range(velocities.shape[1]):
+                    velocities[:, i] = interpolate_array(velocities[:, i])
+                for i in range(sizes.shape[1]):
+                    sizes[:, i] = interpolate_array(sizes[:, i])
+
             agent_translations.extend(translations)
             agent_velocities.extend(velocities)
             agent_sizes.extend(sizes)
-            agent_yaws.extend(yaws)
-
-
-            # for timestep in range(scene.length_timesteps):
-            #     if states[timestep].valid:
-            #         first_timestep = timestep
-            #         break
-            # for timestep in range(scene.length_timesteps):
-            #     if states[scene.length_timesteps - timestep - 1].valid:
-            #         last_timestep = timestep
-            #         break
+            agent_yaws.extend(interpolate_array(yaws))
 
             agent_info = AgentMetadata(
                 name=agent_name,
@@ -242,7 +248,7 @@ class WaymoDataset(RawDataset):
                 for timestep in range(first_timestep, last_timestep + 1):
                     agent_presence[timestep].append(agent_info)
             else:
-                agents_to_remove.append(agent_name)
+                agents_to_remove.append(str(agent_name))
 
         agent_ids = np.repeat(agent_ids, scene.length_timesteps)
         agent_ml_class = np.repeat(agent_ml_class, scene.length_timesteps)
@@ -251,16 +257,6 @@ class WaymoDataset(RawDataset):
         agent_velocities = np.array(agent_velocities)
         agent_sizes = np.array(agent_sizes)
         agent_yaws = np.array(agent_yaws)
-        for i in range(agent_translations.shape[1]):
-            agent_translations[:, i] = interpolate_array(agent_translations[:, i])
-        for i in range(agent_velocities.shape[1]):
-            agent_velocities[:, i] = interpolate_array(agent_velocities[:, i])
-        for i in range(agent_sizes.shape[1]):
-            agent_sizes[:, i] = interpolate_array(agent_sizes[:, i])
-        for i in range(agent_yaws.shape[1]):
-            agent_yaws[:, i] = interpolate_array(agent_yaws[:, i])
-
-
 
         all_agent_data = np.concatenate(
             [
@@ -307,12 +303,11 @@ class WaymoDataset(RawDataset):
                      ] + extent_cols
         # Removing agents with only one detection.
         all_agent_data_df.drop(index=agents_to_remove, inplace=True)
-
         # Changing the agent_id dtype to str
         all_agent_data_df.reset_index(inplace=True)
         all_agent_data_df["agent_id"] = all_agent_data_df["agent_id"].astype(str)
         all_agent_data_df.set_index(["agent_id", "scene_ts"], inplace=True)
-
+        all_agent_data_df.dropna(thresh=3, inplace=True)
         cache_class.save_agent_data(
             all_agent_data_df.loc[:, final_cols],
             cache_path,
