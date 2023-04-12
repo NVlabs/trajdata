@@ -238,10 +238,5 @@ def translate_traffic_state(state: waymo_map_pb2.TrafficSignalLaneState.State) -
     return TrafficLightStatus.UNKNOWN
 
 
-def interpolate_array(data: np.array) -> np.array:
-    interpolated_series = pd.Series(data)
-    first_valid = interpolated_series.first_valid_index()
-    last_valid = interpolated_series.last_valid_index()
-    interpolated_series[first_valid:last_valid] = \
-        interpolated_series[first_valid:last_valid].interpolate()
-    return interpolated_series.values
+def interpolate_array(data: List) -> np.array:
+    return np.array(pd.DataFrame(data).interpolate(limit_area='inside').values)

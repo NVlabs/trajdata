@@ -214,22 +214,16 @@ class WaymoDataset(RawDataset):
                     sizes.append((np.nan, np.nan, np.nan))
                     yaws.append(np.nan)
 
-            translations = np.array(translations)
-            velocities = np.array(velocities)
-            sizes = np.array(sizes)
-            yaws = np.array(yaws)
-            first_timestep = pd.Series(translations[:, 0]).first_valid_index()
-            last_timestep = pd.Series(translations[:, 0]).last_valid_index()
-            if not first_timestep or not last_timestep:
+            translations = interpolate_array(translations)
+            velocities = interpolate_array(velocities)
+            sizes = interpolate_array(sizes)
+            yaws = interpolate_array(yaws)
+            if np.isnan(translations[:, 0]).all():
                 first_timestep = 0
                 last_timestep = 0
-            if last_timestep - first_timestep != 0:
-                for i in range(translations.shape[1]):
-                    translations[:, i] = interpolate_array(translations[:, i])
-                for i in range(velocities.shape[1]):
-                    velocities[:, i] = interpolate_array(velocities[:, i])
-                for i in range(sizes.shape[1]):
-                    sizes[:, i] = interpolate_array(sizes[:, i])
+            else:
+                first_timestep = np.nanargmin(translations[:, 0])
+                last_timestep = np.nanargmax(translations[:, 0])
 
             agent_translations.extend(translations)
             agent_velocities.extend(velocities)
