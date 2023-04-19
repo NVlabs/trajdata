@@ -202,7 +202,7 @@ class WaymoDataset(RawDataset):
             velocities = []
             sizes = []
             yaws = []
-            for state in states:
+            for idx, state in enumerate(states):
                 if state.valid:
                     translations.append((state.center_x, state.center_y, state.center_z))
                     velocities.append((state.velocity_x, state.velocity_y))
@@ -214,16 +214,26 @@ class WaymoDataset(RawDataset):
                     sizes.append((np.nan, np.nan, np.nan))
                     yaws.append(np.nan)
 
-            translations = interpolate_array(translations)
-            velocities = interpolate_array(velocities)
-            sizes = interpolate_array(sizes)
-            yaws = interpolate_array(yaws)
-            if np.isnan(translations[:, 0]).all():
+            curr_agent_data = np.concatenate(
+                (
+                    translations,
+                    velocities,
+                    np.expand_dims(yaws, axis=1),
+                    sizes,
+                ),
+                axis=1)
+
+            curr_agent_data = interpolate_array(curr_agent_data)
+            if index == 0:
+                all_agent_data = curr_agent_data
+            else:
+                all_agent_data = np.concatenate((all_agent_data, curr_agent_data))
+
+            first_timestep = pd.Series(curr_agent_data[:, 0]).first_valid_index()
+            last_timestep = pd.Series(curr_agent_data[:, 0]).last_valid_index()
+            if not first_timestep or not last_timestep:
                 first_timestep = 0
                 last_timestep = 0
-            else:
-                first_timestep = np.nanargmin(translations[:, 0])
-                last_timestep = np.nanargmax(translations[:, 0])
 
             agent_translations.extend(translations)
             agent_velocities.extend(velocities)
@@ -244,25 +254,9 @@ class WaymoDataset(RawDataset):
             else:
                 agents_to_remove.append(str(agent_name))
 
-        agent_ids = np.repeat(agent_ids, scene.length_timesteps)
         agent_ml_class = np.repeat(agent_ml_class, scene.length_timesteps)
-
-        agent_translations = np.array(agent_translations)
-        agent_velocities = np.array(agent_velocities)
-        agent_sizes = np.array(agent_sizes)
-        agent_yaws = np.array(agent_yaws)
-
-        all_agent_data = np.concatenate(
-            [
-                agent_translations,
-                agent_velocities,
-                np.expand_dims(agent_yaws, axis=1),
-                np.expand_dims(agent_ml_class, axis=1),
-                agent_sizes,
-            ],
-            axis=1,
-        )
-
+        all_agent_data = np.insert(all_agent_data, 6, agent_ml_class, axis=1)
+        agent_ids = np.repeat(agent_ids, scene.length_timesteps)
         traj_cols = ["x", "y", "z", "vx", "vy", "heading"]
         class_cols = ["class_id"]
         extent_cols = ["length", "width", "height"]
