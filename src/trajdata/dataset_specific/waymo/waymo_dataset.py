@@ -190,7 +190,7 @@ class WaymoDataset(RawDataset):
         for index, track in enumerate(scenario.tracks):
             agent_name = track.id
             if index == scenario.sdc_track_index:
-                agent_name = "ego"
+                agent_name = 'ego'
             agent_ids.append(agent_name)
 
             agent_type: AgentType = translate_agent_type(track.object_type)
@@ -202,8 +202,13 @@ class WaymoDataset(RawDataset):
             velocities = []
             sizes = []
             yaws = []
+            first_timestep = -1
+            last_timestep = 0
             for idx, state in enumerate(states):
                 if state.valid:
+                    if first_timestep == -1:
+                        first_timestep = idx
+                    last_timestep = idx
                     translations.append((state.center_x, state.center_y, state.center_z))
                     velocities.append((state.velocity_x, state.velocity_y))
                     sizes.append((state.length, state.width, state.height))
@@ -213,7 +218,8 @@ class WaymoDataset(RawDataset):
                     velocities.append((np.nan, np.nan))
                     sizes.append((np.nan, np.nan, np.nan))
                     yaws.append(np.nan)
-
+            if first_timestep == -1:
+                first_timestep = 0
             curr_agent_data = np.concatenate(
                 (
                     translations,
@@ -229,17 +235,6 @@ class WaymoDataset(RawDataset):
             else:
                 all_agent_data = np.concatenate((all_agent_data, curr_agent_data))
 
-            first_timestep = pd.Series(curr_agent_data[:, 0]).first_valid_index()
-            last_timestep = pd.Series(curr_agent_data[:, 0]).last_valid_index()
-            if not first_timestep or not last_timestep:
-                first_timestep = 0
-                last_timestep = 0
-
-            agent_translations.extend(translations)
-            agent_velocities.extend(velocities)
-            agent_sizes.extend(sizes)
-            agent_yaws.extend(interpolate_array(yaws))
-
             agent_info = AgentMetadata(
                 name=agent_name,
                 agent_type=agent_type,
@@ -247,7 +242,7 @@ class WaymoDataset(RawDataset):
                 last_timestep=last_timestep,
                 extent=VariableExtent(),
             )
-            if last_timestep - first_timestep != 0:
+            if last_timestep != first_timestep:
                 agent_list.append(agent_info)
                 for timestep in range(first_timestep, last_timestep + 1):
                     agent_presence[timestep].append(agent_info)
