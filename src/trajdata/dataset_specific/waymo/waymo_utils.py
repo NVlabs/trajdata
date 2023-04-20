@@ -226,25 +226,58 @@ def translate_polyline(
     return max_pt, min_pt
 
 
+def is_full_boundary(lane_boundaries, num_lane_indices: int) -> bool:
+    """Returns True if a given boundary is connected (there are no gaps)
+    and every lane center index has a corresponding boundary point.
+
+    Returns:
+        bool
+    """
+    covers_all: bool = lane_boundaries[0].lane_start_index == 0 and lane_boundaries[
+        0
+    ].lane_end_index == (num_lane_indices - 1)
+    for idx in range(1, len(lane_boundaries)):
+        if (
+            lane_boundaries[idx].lane_start_index
+            != lane_boundaries[idx - 1].lane_end_index + 1
+        ):
+            covers_all = False
+            break
+
+    return covers_all
+
+
 def translate_lane(
     road_lane: vectorized_map_pb2.RoadLane,
     lane: waymo_map_pb2.LaneCenter,
     boundaries: Dict,
 ) -> Tuple[List[float], List[float]]:
     center_max, center_min = translate_polyline(road_lane.center, lane.polyline)
-    left_max = center_max
-    right_max = center_max
-    left_min = center_min
-    right_min = center_min
-    if lane.left_boundaries:
-        left_boundary_map_pts: List[waymo_map_pb2.MapPoint] = []
 
+    left_min = center_min
+    left_max = center_max
+
+    right_min = center_min
+    right_max = center_max
+
+    # TODO(bivanovic): Waymo lane boundaries are... complicated. See
+    # https://github.com/waymo-research/waymo-open-dataset/issues/389
+    # for more information. For now, we only add lane boundaries if they
+    # fully cover the lane without any interior gaps.
+    if lane.left_boundaries and is_full_boundary(
+        lane.left_boundaries, len(lane.polyline)
+    ):
+        left_boundary_map_pts: List[waymo_map_pb2.MapPoint] = []
         for left_boundary in lane.left_boundaries:
             left_boundary_map_pts.extend(boundaries[left_boundary.boundary_feature_id])
+
         left_max, left_min = translate_polyline(
             road_lane.left_boundary, left_boundary_map_pts
         )
-    if lane.right_boundaries:
+
+    if lane.right_boundaries and is_full_boundary(
+        lane.right_boundaries, len(lane.polyline)
+    ):
         right_boundary_map_pts: List[waymo_map_pb2.MapPoint] = []
         for right_boundary in lane.right_boundaries:
             right_boundary_map_pts.extend(
@@ -256,12 +289,16 @@ def translate_lane(
 
     road_lane.entry_lanes.extend(np.array(lane.entry_lanes).astype(bytes).tolist())
     road_lane.exit_lanes.extend(np.array(lane.exit_lanes).astype(bytes).tolist())
+
     for neighbor in lane.left_neighbors:
         road_lane.adjacent_lanes_left.append(bytes(neighbor.feature_id))
+
     for neighbor in lane.right_neighbors:
         road_lane.adjacent_lanes_right.append(bytes(neighbor.feature_id))
+
     max_point = np.max([center_max, left_max, right_max], axis=0)
     min_point = np.min([center_min, left_min, right_min], axis=0)
+
     return max_point, min_point
 
 

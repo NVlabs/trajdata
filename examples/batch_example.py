@@ -23,8 +23,8 @@ def main():
         incl_raster_map=True,
         raster_map_params={
             "px_per_m": 2,
-            "map_size_px": 1024,
-            "offset_frac_xy": (-0.0, 0.0),
+            "map_size_px": 224,
+            "offset_frac_xy": (-0.5, 0.0),
         },
         augmentations=[noise_hists],
         num_workers=0,
