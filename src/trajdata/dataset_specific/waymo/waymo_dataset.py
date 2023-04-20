@@ -212,7 +212,8 @@ class WaymoDataset(RawDataset):
                     velocities.append((np.nan, np.nan))
                     sizes.append((np.nan, np.nan, np.nan))
                     yaws.append(np.nan)
-
+            if first_timestep == -1:
+                first_timestep = 0
             curr_agent_data = np.concatenate(
                 (
                     translations,
