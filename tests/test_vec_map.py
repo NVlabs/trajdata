@@ -23,6 +23,8 @@ class TestVectorMap(unittest.TestCase):
             "lyft_sample": ["palo_alto"],
         }
 
+    # TODO(pkarkus) this assumes we already have the maps cached. It would be better
+    # to attempt to cache them if the cache does not yet exists.
     def test_map_existence(self):
         for env_name, map_names in self.location_dict.items():
             for map_name in map_names:

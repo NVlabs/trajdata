@@ -7,6 +7,7 @@ from trajdata import filtering
 from trajdata.caching import SceneCache
 from trajdata.data_structures.agent import Agent, AgentMetadata, AgentType
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray
 
 
 class SceneTime:
@@ -41,9 +42,9 @@ class SceneTime:
         return cls(scene, scene_ts, filtered_agents, cache)
 
     def get_agent_distances_to(self, agent: Agent) -> np.ndarray:
-        agent_pos: np.ndarray = self.cache.get_state(agent.name, self.ts)[:2]
+        agent_pos: StateArray = self.cache.get_state(agent.name, self.ts).position
         nb_pos: np.ndarray = np.stack(
-            [self.cache.get_state(nb.name, self.ts)[:2] for nb in self.agents]
+            [self.cache.get_state(nb.name, self.ts).position for nb in self.agents]
         )
 
         return np.linalg.norm(nb_pos - agent_pos, axis=1)
@@ -108,9 +109,9 @@ class SceneTimeAgent:
 
     # @profile
     def get_agent_distances_to(self, agent_info: AgentMetadata) -> np.ndarray:
-        agent_pos: np.ndarray = self.cache.get_state(agent_info.name, self.ts)[:2]
+        agent_pos: StateArray = self.cache.get_state(agent_info.name, self.ts).position
 
-        curr_poses: np.ndarray = self.cache.get_states(
+        curr_poses: StateArray = self.cache.get_states(
             [a.name for a in self.agents], self.ts
-        )[:, :2]
+        ).position
         return np.linalg.norm(curr_poses - agent_pos, axis=1)

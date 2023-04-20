@@ -6,6 +6,7 @@ from tqdm import trange
 
 from trajdata import AgentBatch, AgentType, UnifiedDataset
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray
 from trajdata.simulation import SimulationScene, sim_metrics, sim_stats, sim_vis
 from trajdata.visualization.vis import plot_agent_batch
 
@@ -20,7 +21,6 @@ def main():
         #     "px_per_m": 2,
         #     "map_size_px": 224,
         #     "offset_frac_xy": (0.0, 0.0),
-        #     "return_rgb": True,
         # },
         verbose=True,
         # desired_dt=0.1,
@@ -55,32 +55,31 @@ def main():
 
         obs: AgentBatch = sim_scene.reset()
         for t in trange(1, sim_scene.scene.length_timesteps):
-            new_xyh_dict: Dict[str, np.ndarray] = dict()
+            new_xyzh_dict: Dict[str, StateArray] = dict()
             for idx, agent_name in enumerate(obs.agent_name):
-                curr_yaw = obs.curr_agent_state[idx, -1]
-                curr_pos = obs.curr_agent_state[idx, :2]
+                curr_yaw = obs.curr_agent_state[idx].heading.item()
+                curr_pos = obs.curr_agent_state[idx].position.numpy()
                 world_from_agent = np.array(
                     [
                         [np.cos(curr_yaw), np.sin(curr_yaw)],
                         [-np.sin(curr_yaw), np.cos(curr_yaw)],
                     ]
                 )
-                next_state = np.zeros((3,))
+                next_state = np.zeros((4,))
                 if obs.agent_fut_len[idx] < 1:
                     next_state[:2] = curr_pos
                     yaw_ac = 0
                 else:
                     next_state[:2] = (
-                        obs.agent_fut[idx, 0, :2] @ world_from_agent + curr_pos
+                        obs.agent_fut[idx, 0].position.numpy() @ world_from_agent
+                        + curr_pos
                     )
-                    yaw_ac = np.arctan2(
-                        obs.agent_fut[idx, 0, -2], obs.agent_fut[idx, 0, -1]
-                    )
+                    yaw_ac = obs.agent_fut[idx, 0].heading.item()
 
-                next_state[2] = curr_yaw + yaw_ac
-                new_xyh_dict[agent_name] = next_state
+                next_state[-1] = curr_yaw + yaw_ac
+                new_xyzh_dict[agent_name] = StateArray.from_array(next_state, "x,y,z,h")
 
-            obs = sim_scene.step(new_xyh_dict)
+            obs = sim_scene.step(new_xyzh_dict)
             metrics: Dict[str, Dict[str, float]] = sim_scene.get_metrics([ade, fde])
             print(metrics)
 

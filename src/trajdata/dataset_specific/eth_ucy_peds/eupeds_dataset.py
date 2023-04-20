@@ -247,6 +247,9 @@ class EUPedsDataset(RawDataset):
 
         agent_ids: np.ndarray = scene_data.index.get_level_values(0).to_numpy()
 
+        # Add in zero for z value
+        scene_data["z"] = np.zeros_like(scene_data["x"])
+
         ### Calculating agent velocities
         scene_data[["vx", "vy"]] = (
             arr_utils.agent_aware_diff(scene_data[["x", "y"]].to_numpy(), agent_ids)

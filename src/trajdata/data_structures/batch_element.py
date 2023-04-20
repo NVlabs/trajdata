@@ -7,7 +7,9 @@ import numpy as np
 from trajdata.caching import SceneCache
 from trajdata.data_structures.agent import AgentMetadata, AgentType
 from trajdata.data_structures.scene import SceneTime, SceneTimeAgent
+from trajdata.data_structures.state import StateArray
 from trajdata.maps import MapAPI, RasterizedMapPatch, VectorMap
+from trajdata.utils.state_utils import convert_to_frame_state, transform_from_frame
 
 
 class AgentBatchElement:
@@ -29,6 +31,7 @@ class AgentBatchElement:
         raster_map_params: Optional[Dict[str, Any]] = None,
         map_api: Optional[MapAPI] = None,
         vector_map_params: Optional[Dict[str, Any]] = None,
+        state_format: Optional[str] = None,
         standardize_data: bool = False,
         standardize_derivatives: bool = False,
         max_neighbor_num: Optional[int] = None,
@@ -45,16 +48,26 @@ class AgentBatchElement:
         self.agent_type: AgentType = agent_info.type
         self.max_neighbor_num = max_neighbor_num
 
-        self.curr_agent_state_np: np.ndarray = cache.get_raw_state(
-            agent_info.name, self.scene_ts
-        )
+        raw_state: StateArray = cache.get_raw_state(agent_info.name, self.scene_ts)
+        if state_format is not None:
+            self.curr_agent_state_np = raw_state.as_format(state_format)
+        else:
+            self.curr_agent_state_np = raw_state
 
         self.standardize_data = standardize_data
         if self.standardize_data:
-            agent_pos: np.ndarray = self.curr_agent_state_np[:2]
-            agent_heading: float = self.curr_agent_state_np[-1]
+            # Request cache to return observations relative to current agent
+            obs_frame: StateArray = convert_to_frame_state(
+                raw_state,
+                stationary=not standardize_derivatives,
+                grounded=True,
+            )
+            cache.set_obs_frame(obs_frame)
 
-            cos_agent, sin_agent = np.cos(agent_heading), np.sin(agent_heading)
+            # Create and store 2d tranformation matrix to agent from world
+            agent_pos = self.curr_agent_state_np.position
+            agent_heading_vector = self.curr_agent_state_np.heading_vector
+            cos_agent, sin_agent = agent_heading_vector[0], agent_heading_vector[1]
             world_from_agent_tf: np.ndarray = np.array(
                 [
                     [cos_agent, -sin_agent, agent_pos[0]],
@@ -63,17 +76,6 @@ class AgentBatchElement:
                 ]
             )
             self.agent_from_world_tf: np.ndarray = np.linalg.inv(world_from_agent_tf)
-
-            offset = self.curr_agent_state_np.copy()
-            if not standardize_derivatives:
-                offset[2:6] = 0.0
-
-            cache.transform_data(
-                shift_mean_to=offset,
-                rotate_by=agent_heading,
-                sincos_heading=True,
-            )
-
         else:
             self.agent_from_world_tf: np.ndarray = np.eye(3)
 
@@ -87,6 +89,7 @@ class AgentBatchElement:
             agent_info, future_sec
         )
         self.agent_future_len: int = self.agent_future_np.shape[0]
+        self.agent_meta_dict: Dict = get_agent_meta_dict(self.cache, agent_info)
 
         ### NEIGHBOR-SPECIFIC DATA ###
         def distance_limit(agent_types: np.ndarray, target_type: int) -> np.ndarray:
@@ -97,31 +100,32 @@ class AgentBatchElement:
                 ]
             )
 
+        nearby_agents, self.neighbor_types_np = self.get_nearby_agents(
+            scene_time_agent, agent_info, distance_limit
+        )
+
+        self.num_neighbors = len(nearby_agents)
         (
-            self.num_neighbors,
-            self.neighbor_types_np,
             self.neighbor_histories,
             self.neighbor_history_extents,
             self.neighbor_history_lens_np,
-        ) = self.get_neighbor_history(
-            scene_time_agent, agent_info, history_sec, distance_limit
-        )
+        ) = self.get_neighbor_history(history_sec, nearby_agents)
 
         (
-            _,
-            _,
             self.neighbor_futures,
             self.neighbor_future_extents,
             self.neighbor_future_lens_np,
-        ) = self.get_neighbor_future(
-            scene_time_agent, agent_info, future_sec, distance_limit
-        )
+        ) = self.get_neighbor_future(future_sec, nearby_agents)
+
+        self.neighbor_meta_dicts: Dict = [
+            get_agent_meta_dict(self.cache, agent) for agent in nearby_agents
+        ]
 
         ### ROBOT DATA ###
-        self.robot_future_np: Optional[np.ndarray] = None
+        self.robot_future_np: Optional[StateArray] = None
 
         if incl_robot_future:
-            self.robot_future_np: np.ndarray = self.get_robot_current_and_future(
+            self.robot_future_np: StateArray = self.get_robot_current_and_future(
                 scene_time_agent.robot, future_sec
             )
 
@@ -158,7 +162,7 @@ class AgentBatchElement:
         self,
         agent_info: AgentMetadata,
         history_sec: Tuple[Optional[float], Optional[float]],
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[StateArray, np.ndarray]:
         agent_history_np, agent_extent_history_np = self.cache.get_agent_history(
             agent_info, self.scene_ts, history_sec
         )
@@ -168,21 +172,22 @@ class AgentBatchElement:
         self,
         agent_info: AgentMetadata,
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> np.ndarray:
+    ) -> Tuple[StateArray, np.ndarray]:
         agent_future_np, agent_extent_future_np = self.cache.get_agent_future(
             agent_info, self.scene_ts, future_sec
         )
         return agent_future_np, agent_extent_future_np
 
     # @profile
-    def get_neighbor_data(
+    def get_nearby_agents(
         self,
         scene_time: SceneTimeAgent,
         agent_info: AgentMetadata,
-        length_sec: Tuple[Optional[float], Optional[float]],
         distance_limit: Callable[[np.ndarray, int], np.ndarray],
-        mode: str,
-    ) -> Tuple[int, np.ndarray, List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[AgentMetadata], np.ndarray]:
+        """
+        Returns Agent Metadata and Agent types of nearby agents
+        """
         # The indices of the returned ndarray match the scene_time agents list
         # (including the index of the central agent, which would have a distance
         # of 0 to itself).
@@ -199,82 +204,68 @@ class AgentBatchElement:
         nearby_agents: List[AgentMetadata] = [
             scene_time.agents[idx] for idx in nb_idx if nearby_mask[idx]
         ]
-        neighbor_types_np: np.ndarray = neighbor_types[nearby_mask]
 
         if self.max_neighbor_num is not None:
             # Pruning nearby_agents and re-creating
             # neighbor_types_np with the remaining agents.
             nearby_agents = nearby_agents[: self.max_neighbor_num]
-            neighbor_types_np: np.ndarray = np.array(
-                [a.type.value for a in nearby_agents]
-            )
 
-        num_neighbors: int = len(nearby_agents)
+        # Doing this here because the argsort above changes the order of agents.
+        neighbor_types_np: np.ndarray = np.array([a.type.value for a in nearby_agents])
 
-        if mode == "history":
-            (
-                neighbor_data,
-                neighbor_extents_data,
-                neighbor_data_lens_np,
-            ) = self.cache.get_agents_history(self.scene_ts, nearby_agents, length_sec)
-        elif mode == "future":
-            (
-                neighbor_data,
-                neighbor_extents_data,
-                neighbor_data_lens_np,
-            ) = self.cache.get_agents_future(self.scene_ts, nearby_agents, length_sec)
-        else:
-            raise ValueError(f"Unknown mode {mode} passed in!")
+        return nearby_agents, neighbor_types_np
 
+    def get_neighbor_history(
+        self,
+        history_sec: Tuple[Optional[float], Optional[float]],
+        nearby_agents: List[AgentMetadata],
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+        (
+            neighbor_data,
+            neighbor_extents_data,
+            neighbor_data_lens_np,
+        ) = self.cache.get_agents_history(self.scene_ts, nearby_agents, history_sec)
         return (
-            num_neighbors,
-            neighbor_types_np,
             neighbor_data,
             neighbor_extents_data,
             neighbor_data_lens_np,
         )
 
-    def get_neighbor_history(
-        self,
-        scene_time: SceneTimeAgent,
-        agent_info: AgentMetadata,
-        history_sec: Tuple[Optional[float], Optional[float]],
-        distance_limit: Callable[[np.ndarray, int], np.ndarray],
-    ) -> Tuple[int, np.ndarray, List[np.ndarray], List[np.ndarray], np.ndarray]:
-        return self.get_neighbor_data(
-            scene_time, agent_info, history_sec, distance_limit, mode="history"
-        )
-
     def get_neighbor_future(
         self,
-        scene_time: SceneTimeAgent,
-        agent_info: AgentMetadata,
         future_sec: Tuple[Optional[float], Optional[float]],
-        distance_limit: Callable[[np.ndarray, int], np.ndarray],
-    ) -> Tuple[int, np.ndarray, List[np.ndarray], List[np.ndarray], np.ndarray]:
-        return self.get_neighbor_data(
-            scene_time, agent_info, future_sec, distance_limit, mode="future"
+        nearby_agents: List[AgentMetadata],
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+        (
+            neighbor_data,
+            neighbor_extents_data,
+            neighbor_data_lens_np,
+        ) = self.cache.get_agents_future(self.scene_ts, nearby_agents, future_sec)
+        return (
+            neighbor_data,
+            neighbor_extents_data,
+            neighbor_data_lens_np,
         )
 
     def get_robot_current_and_future(
         self,
         robot_info: AgentMetadata,
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> np.ndarray:
-        robot_curr_np: np.ndarray = self.cache.get_state(robot_info.name, self.scene_ts)
+    ) -> StateArray:
+        robot_curr_np: StateArray = self.cache.get_state(robot_info.name, self.scene_ts)
         # robot_fut_extents_np,
         (
             robot_fut_np,
             _,
         ) = self.cache.get_agent_future(robot_info, self.scene_ts, future_sec)
 
-        robot_curr_and_fut_np: np.ndarray = np.concatenate(
+        robot_curr_and_fut_np: StateArray = np.concatenate(
             (robot_curr_np[np.newaxis, :], robot_fut_np), axis=0
-        )
+        ).view(self.cache.obs_type)
         return robot_curr_and_fut_np
 
     def get_agent_map_patch(self, patch_params: Dict[str, int]) -> RasterizedMapPatch:
-        world_x, world_y = self.curr_agent_state_np[:2]
+        world_x, world_y = self.curr_agent_state_np.position
         desired_patch_size: int = patch_params["map_size_px"]
         resolution: float = patch_params["px_per_m"]
         offset_xy: Tuple[float, float] = patch_params.get("offset_frac_xy", (0.0, 0.0))
@@ -282,7 +273,7 @@ class AgentBatchElement:
         no_map_fill_val: float = patch_params.get("no_map_fill_value", 0.0)
 
         if self.standardize_data:
-            heading = self.curr_agent_state_np[-1]
+            heading = self.curr_agent_state_np.heading[0]
             patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
                 world_x,
                 world_y,
@@ -335,6 +326,7 @@ class SceneBatchElement:
         raster_map_params: Optional[Dict[str, Any]] = None,
         map_api: Optional[MapAPI] = None,
         vector_map_params: Optional[Dict[str, Any]] = None,
+        state_format: Optional[str] = None,
         standardize_data: bool = False,
         standardize_derivatives: bool = False,
         max_agent_num: Optional[int] = None,
@@ -355,14 +347,29 @@ class SceneBatchElement:
         else:
             self.centered_agent = self.agents[0]
 
-        self.centered_agent_state_np: np.ndarray = cache.get_state(
+        raw_state: StateArray = cache.get_raw_state(
             self.centered_agent.name, self.scene_ts
         )
+
+        if state_format is not None:
+            self.centered_agent_state_np = raw_state.as_format(state_format)
+        else:
+            self.centered_agent_state_np = raw_state
+
         self.standardize_data = standardize_data
 
         if self.standardize_data:
-            agent_pos: np.ndarray = self.centered_agent_state_np[:2]
-            agent_heading: float = self.centered_agent_state_np[-1]
+            # Request cache to return observations relative to centered agent
+            obs_frame: StateArray = convert_to_frame_state(
+                raw_state,
+                stationary=not standardize_derivatives,
+                grounded=True,
+            )
+            cache.set_obs_frame(obs_frame)
+
+            # Create 2d transformation matrix to and from agent and world
+            agent_pos: np.ndarray = self.centered_agent_state_np.position
+            agent_heading: float = self.centered_agent_state_np.heading[0]
 
             cos_agent, sin_agent = np.cos(agent_heading), np.sin(agent_heading)
             self.centered_world_from_agent_tf: np.ndarray = np.array(
@@ -374,16 +381,6 @@ class SceneBatchElement:
             )
             self.centered_agent_from_world_tf: np.ndarray = np.linalg.inv(
                 self.centered_world_from_agent_tf
-            )
-
-            offset = self.centered_agent_state_np
-            if not standardize_derivatives:
-                offset[2:6] = 0.0
-
-            cache.transform_data(
-                shift_mean_to=offset,
-                rotate_by=agent_heading,
-                sincos_heading=True,
             )
         else:
             self.centered_agent_from_world_tf: np.ndarray = np.eye(3)
@@ -415,6 +412,10 @@ class SceneBatchElement:
             self.agent_future_lens_np,
         ) = self.get_agents_future(future_sec, nearby_agents)
 
+        self.agent_meta_dicts = [
+            get_agent_meta_dict(self.cache, agent) for agent in nearby_agents
+        ]
+
         ### MAP ###
         self.map_name: Optional[str] = None
         self.map_patches: Optional[RasterizedMapPatch] = None
@@ -437,10 +438,10 @@ class SceneBatchElement:
         self.scene_id = scene_time.scene.name
 
         ### ROBOT DATA ###
-        self.robot_future_np: Optional[np.ndarray] = None
+        self.robot_future_np: Optional[StateArray] = None
 
         if incl_robot_future:
-            self.robot_future_np: np.ndarray = self.get_robot_current_and_future(
+            self.robot_future_np: StateArray = self.get_robot_current_and_future(
                 self.centered_agent, future_sec
             )
 
@@ -479,7 +480,7 @@ class SceneBatchElement:
         self,
         history_sec: Tuple[Optional[float], Optional[float]],
         nearby_agents: List[AgentMetadata],
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
         # The indices of the returned ndarray match the scene_time agents list (including the index of the central agent,
         # which would have a distance of 0 to itself).
         (
@@ -498,7 +499,7 @@ class SceneBatchElement:
         self,
         future_sec: Tuple[Optional[float], Optional[float]],
         nearby_agents: List[AgentMetadata],
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], np.ndarray]:
+    ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
 
         (
             agent_futures,
@@ -515,95 +516,49 @@ class SceneBatchElement:
     def get_agents_map_patch(
         self, patch_params: Dict[str, int], agent_histories: List[np.ndarray]
     ) -> List[RasterizedMapPatch]:
-        world_x, world_y = self.centered_agent_state_np[:2]
-        heading = self.centered_agent_state_np[-1]
         desired_patch_size: int = patch_params["map_size_px"]
         resolution: float = patch_params["px_per_m"]
         offset_xy: Tuple[float, float] = patch_params.get("offset_frac_xy", (0.0, 0.0))
         return_rgb: bool = patch_params.get("return_rgb", True)
         no_map_fill_val: float = patch_params.get("no_map_fill_value", 0.0)
 
-        if self.cache._sincos_heading:
-            if len(self.cache.heading_cols) == 2:
-                heading_sin_idx, heading_cos_idx = self.cache.heading_cols
-            else:
-                heading_sin_idx, heading_cos_idx = (
-                    self.cache.heading_cols[0],
-                    self.cache.heading_cols[0] + 1,
-                )
-            sincos = True
-
-        else:
-            heading_idx = self.cache.heading_cols[0]
-            sincos = False
-
-        x_idx, y_idx = self.cache.pos_cols
-
         map_patches = list()
 
         curr_state = [state[-1] for state in agent_histories]
-        curr_state = np.stack(curr_state)
+        curr_state = np.stack(curr_state).view(self.cache.obs_type)
+
         if self.standardize_data:
-            Rot = np.array(
-                [
-                    [np.cos(heading), -np.sin(heading)],
-                    [np.sin(heading), np.cos(heading)],
-                ]
+            # need to transform back into world frame
+            obs_frame: StateArray = convert_to_frame_state(
+                self.centered_agent_state_np, stationary=True, grounded=True
             )
-            if sincos:
-                agent_heading = (
-                    np.arctan2(
-                        curr_state[:, heading_sin_idx], curr_state[:, heading_cos_idx]
-                    )
-                    + heading
-                )
-            else:
-                agent_heading = curr_state[:, heading_idx] + heading
-            world_dxy = curr_state[:, [x_idx, y_idx]] @ (Rot.T)
-            for i in range(curr_state.shape[0]):
-                patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
-                    world_x + world_dxy[i, 0],
-                    world_y + world_dxy[i, 1],
-                    desired_patch_size,
-                    resolution,
-                    offset_xy,
-                    agent_heading[i],
-                    return_rgb,
-                    rot_pad_factor=sqrt(2),
-                    no_map_val=no_map_fill_val,
-                )
-                map_patches.append(
-                    RasterizedMapPatch(
-                        data=patch_data,
-                        rot_angle=agent_heading[i],
-                        crop_size=desired_patch_size,
-                        resolution=resolution,
-                        raster_from_world_tf=raster_from_world_tf,
-                        has_data=has_data,
-                    )
-                )
+            curr_state = transform_from_frame(curr_state, obs_frame)
+            heading = curr_state.heading[:, 0]
         else:
-            for i in range(curr_state.shape[0]):
-                patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
-                    curr_state[i, x_idx],
-                    curr_state[i, y_idx],
-                    desired_patch_size,
-                    resolution,
-                    offset_xy,
-                    0,
-                    return_rgb,
-                    no_map_val=no_map_fill_val,
+            heading = 0.0 * curr_state.heading[:, 0]
+
+        for i in range(curr_state.shape[0]):
+            patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
+                curr_state.get_attr("x")[i],
+                curr_state.get_attr("y")[i],
+                desired_patch_size,
+                resolution,
+                offset_xy,
+                heading[i],
+                return_rgb,
+                rot_pad_factor=sqrt(2),
+                no_map_val=no_map_fill_val,
+            )
+            map_patches.append(
+                RasterizedMapPatch(
+                    data=patch_data,
+                    rot_angle=heading[i],
+                    crop_size=desired_patch_size,
+                    resolution=resolution,
+                    raster_from_world_tf=raster_from_world_tf,
+                    has_data=has_data,
                 )
-                map_patches.append(
-                    RasterizedMapPatch(
-                        data=patch_data,
-                        rot_angle=0,
-                        crop_size=desired_patch_size,
-                        resolution=resolution,
-                        raster_from_world_tf=raster_from_world_tf,
-                        has_data=has_data,
-                    )
-                )
+            )
 
         return map_patches
 
@@ -611,15 +566,33 @@ class SceneBatchElement:
         self,
         robot_info: AgentMetadata,
         future_sec: Tuple[Optional[float], Optional[float]],
-    ) -> np.ndarray:
-        robot_curr_np: np.ndarray = self.cache.get_state(robot_info.name, self.scene_ts)
+    ) -> StateArray:
+        robot_curr_np: StateArray = self.cache.get_state(robot_info.name, self.scene_ts)
         # robot_fut_extents_np,
         (
             robot_fut_np,
             _,
         ) = self.cache.get_agent_future(robot_info, self.scene_ts, future_sec)
 
-        robot_curr_and_fut_np: np.ndarray = np.concatenate(
+        robot_curr_and_fut_np: StateArray = np.concatenate(
             (robot_curr_np[np.newaxis, :], robot_fut_np), axis=0
-        )
+        ).view(self.cache.obs_type)
         return robot_curr_and_fut_np
+
+
+def is_agent_stationary(cache: SceneCache, agent_info: AgentMetadata) -> bool:
+    # Agent is considered stationary if it moves less than 1m between the first and last valid timestep.
+    first_state: StateArray = cache.get_state(
+        agent_info.name, agent_info.first_timestep
+    )
+    last_state: StateArray = cache.get_state(agent_info.name, agent_info.last_timestep)
+    is_stationary = np.square(last_state.position - first_state.position).sum(0) < 1.0
+    return is_stationary
+
+
+def get_agent_meta_dict(
+    cache: SceneCache, agent_info: AgentMetadata
+) -> Dict[str, np.ndarray]:
+    return {
+        "is_stationary": is_agent_stationary(cache, agent_info),
+    }

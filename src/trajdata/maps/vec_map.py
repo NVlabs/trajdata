@@ -333,14 +333,40 @@ class VectorMap:
         """Associates vector map with scene-specific data like traffic light information"""
         self.traffic_light_status = traffic_light_status_dict
 
-    def get_closest_lane(self, xyzh: np.ndarray) -> RoadLane:
-        lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
-        return self.lanes[lane_kdtree.closest_polyline_ind(xyzh)]
+    def get_current_lane(
+        self,
+        xyzh: np.ndarray,
+        max_dist: float = 2.0,
+        max_heading_error: float = np.pi / 8,
+    ) -> List[RoadLane]:
+        """
+        Args:
+            xyzh (np.ndarray): 3d position and heading of agent in world coordinates
 
-    def get_lanes_within(self, xyzh: np.ndarray, dist: float) -> List[RoadLane]:
+        Returns:
+            List[RoadLane]: List of possible road lanes that agent could be on
+        """
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return [
-            self.lanes[idx] for idx in lane_kdtree.polyline_inds_in_range(xyzh, dist)
+            self.lanes[idx]
+            for idx in lane_kdtree.current_lane_inds(xyzh, max_dist, max_heading_error)
+        ]
+
+    def get_closest_lane(self, xyz: np.ndarray) -> RoadLane:
+        lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
+        return self.lanes[lane_kdtree.closest_polyline_ind(xyz)]
+
+    def get_closest_unique_lanes(self, xyz_vec: np.ndarray) -> List[RoadLane]:
+        assert xyz_vec.ndim == 2  # xyz_vec is assumed to be (*, 3)
+        lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
+        closest_inds = lane_kdtree.closest_polyline_ind(xyz_vec)
+        unique_inds = np.unique(closest_inds)
+        return [self.lanes[ind] for ind in unique_inds]
+
+    def get_lanes_within(self, xyz: np.ndarray, dist: float) -> List[RoadLane]:
+        lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
+        return [
+            self.lanes[idx] for idx in lane_kdtree.polyline_inds_in_range(xyz, dist)
         ]
 
     def get_traffic_light_status(

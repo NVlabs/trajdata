@@ -12,6 +12,7 @@ from trajdata.data_structures.batch_element import AgentBatchElement
 from trajdata.data_structures.collation import agent_collate_fn
 from trajdata.data_structures.scene import SceneTimeAgent
 from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray
 from trajdata.dataset import UnifiedDataset
 from trajdata.simulation.sim_cache import SimulationCache
 from trajdata.simulation.sim_df_cache import SimulationDataFrameCache
@@ -94,12 +95,12 @@ class SimulationScene:
 
     def step(
         self,
-        new_xyh_dict: Dict[str, np.ndarray],
+        new_xyzh_dict: Dict[str, StateArray],
         return_obs=True,
     ) -> Union[AgentBatch, Dict[str, Any]]:
         self.scene_ts += 1
 
-        self.cache.append_state(new_xyh_dict)
+        self.cache.append_state(new_xyzh_dict)
 
         if not self.freeze_agents:
             agents_present: List[AgentMetadata] = self.scene.agent_presence[
@@ -120,30 +121,43 @@ class SimulationScene:
         self, collate: bool = True, get_map: bool = True
     ) -> Union[AgentBatch, Dict[str, Any]]:
         agent_data_list: List[AgentBatchElement] = list()
+        self.cache.set_obs_format(self.dataset.obs_format)
+
         for agent in self.agents:
             scene_time_agent = SceneTimeAgent(
                 self.scene, self.scene_ts, self.agents, agent, self.cache
             )
-            agent_data_list.append(
-                AgentBatchElement(
-                    self.cache,
-                    -1,  # Not used
-                    scene_time_agent,
-                    history_sec=self.dataset.history_sec,
-                    future_sec=self.dataset.future_sec,
-                    agent_interaction_distances=self.dataset.agent_interaction_distances,
-                    incl_robot_future=False,
-                    incl_raster_map=get_map and self.dataset.incl_raster_map,
-                    raster_map_params=self.dataset.raster_map_params,
-                    standardize_data=self.dataset.standardize_data,
-                    standardize_derivatives=self.dataset.standardize_derivatives,
-                    max_neighbor_num=self.dataset.max_neighbor_num,
-                )
+            batch_element: AgentBatchElement = AgentBatchElement(
+                self.cache,
+                -1,  # Not used
+                scene_time_agent,
+                history_sec=self.dataset.history_sec,
+                future_sec=self.dataset.future_sec,
+                agent_interaction_distances=self.dataset.agent_interaction_distances,
+                incl_robot_future=False,
+                incl_raster_map=get_map and self.dataset.incl_raster_map,
+                raster_map_params=self.dataset.raster_map_params,
+                map_api=self.dataset._map_api,
+                vector_map_params=self.dataset.vector_map_params,
+                state_format=self.dataset.state_format,
+                standardize_data=self.dataset.standardize_data,
+                standardize_derivatives=self.dataset.standardize_derivatives,
+                max_neighbor_num=self.dataset.max_neighbor_num,
             )
+            agent_data_list.append(batch_element)
+
+            for key, extra_fn in self.dataset.extras.items():
+                batch_element.extras[key] = extra_fn(batch_element)
+
+            for transform_fn in self.dataset.transforms:
+                batch_element = transform_fn(batch_element)
+
+            if not self.dataset.vector_map_params.get("collate", False):
+                batch_element.vec_map = None
 
             # Need to reset transformations for each agent since each
             # AgentBatchElement transforms (standardizes) the cache.
-            self.cache.reset_transforms()
+            self.cache.reset_obs_frame()
 
         if collate:
             return agent_collate_fn(

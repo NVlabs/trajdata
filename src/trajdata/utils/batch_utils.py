@@ -23,6 +23,7 @@ def convert_to_agent_batch(
     incl_map: bool = False,
     map_params: Optional[Dict[str, Any]] = None,
     max_neighbor_num: Optional[int] = None,
+    state_format: Optional[str] = None,
     standardize_data: bool = True,
     standardize_derivatives: bool = False,
     pad_format: str = "outside",
@@ -52,12 +53,13 @@ def convert_to_agent_batch(
     scene = cache.scene
     dt = scene_batch_element.dt
     ts = scene_batch_element.scene_ts
+    state_format = scene_batch_element.centered_agent_state_np._format
 
     batch_elems: List[AgentBatchElement] = []
     for j, agent_name in enumerate(scene_batch_element.agent_names):
         history_sec = dt * (scene_batch_element.agent_histories[j].shape[0] - 1)
         future_sec = dt * (scene_batch_element.agent_futures[j].shape[0])
-        cache.reset_transforms()
+        cache.reset_obs_frame()
         scene_time_agent: SceneTimeAgent = SceneTimeAgent.from_cache(
             scene,
             ts,
@@ -77,6 +79,7 @@ def convert_to_agent_batch(
                 agent_interaction_distances=agent_interaction_distances,
                 incl_raster_map=incl_map,
                 raster_map_params=map_params,
+                state_format=state_format,
                 standardize_data=standardize_data,
                 standardize_derivatives=standardize_derivatives,
                 max_neighbor_num=max_neighbor_num,

@@ -25,7 +25,7 @@ def custom_goal_location(
     batch_elem: Union[AgentBatchElement, SceneBatchElement]
 ) -> np.ndarray:
     # simply access existing element attributes
-    return batch_elem.agent_future_np[:, :2]
+    return batch_elem.agent_future_np.position
 
 
 def custom_min_distance_from_others(

@@ -67,7 +67,7 @@ class Polyline:
             map_utils.interpolate(self.points, num_pts=num_pts, max_dist=max_dist)
         )
 
-    def project_onto(self, xyzh: np.ndarray) -> np.ndarray:
+    def project_onto(self, xyz_or_xyzh: np.ndarray) -> np.ndarray:
         """Project the given points onto this Polyline.
 
         Args:
@@ -80,7 +80,7 @@ class Polyline:
             D = 4 if this Polyline has headings, otherwise D = 3
         """
         # xyzh is now (M, 1, 3), we do not use heading for projection.
-        xyz = xyzh[:, np.newaxis, :3]
+        xyz = xyz_or_xyzh[:, np.newaxis, :3]
 
         # p0, p1 are (1, N, 3)
         p0: np.ndarray = self.points[np.newaxis, :-1, :3]

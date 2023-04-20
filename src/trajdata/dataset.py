@@ -28,6 +28,8 @@ from trajdata import filtering
 from trajdata.augmentation.augmentation import Augmentation, BatchAugmentation
 from trajdata.caching import EnvCache, SceneCache, df_cache
 from trajdata.data_structures import (
+    NP_STATE_TYPES,
+    TORCH_STATE_TYPES,
     AgentBatchElement,
     AgentDataIndex,
     AgentMetadata,
@@ -82,6 +84,8 @@ class UnifiedDataset(Dataset):
         only_types: Optional[List[AgentType]] = None,
         only_predict: Optional[List[AgentType]] = None,
         no_types: Optional[List[AgentType]] = None,
+        state_format: str = "x,y,xd,yd,xdd,ydd,h",
+        obs_format: str = "x,y,xd,yd,xdd,ydd,s,c",
         standardize_data: bool = True,
         standardize_derivatives: bool = False,
         augmentations: Optional[List[Augmentation]] = None,
@@ -135,6 +139,8 @@ class UnifiedDataset(Dataset):
             only_types (Optional[List[AgentType]], optional): Filter out all agents EXCEPT for those of the specified types. Defaults to None.
             only_predict (Optional[List[AgentType]], optional): Only predict the specified types of agents. Importantly, this keeps other agent types in the scene, e.g., as neighbors of the agent to be predicted. Defaults to None.
             no_types (Optional[List[AgentType]], optional): Filter out all agents with the specified types. Defaults to None.
+            state_format (str, optional): Ordered comma separated list of elements to return for current/centered agent state. Defaults to "x,y,xd,yd,xdd,ydd,h".
+            obs_format (str, optional): Ordered comma separated list of elements to return for history and future agent state arrays. Defaults to "x,y,xd,yd,xdd,ydd,s,c".
             standardize_data (bool, optional): Standardize all data such that (1) the predicted agent's orientation at the current timestep is 0, (2) all data is made relative to the predicted agent's current position, and (3) the agent's heading value is replaced with its sin, cos values. Defaults to True.
             standardize_derivatives (bool, optional): Make agent velocities and accelerations relative to the agent being predicted. Defaults to False.
             augmentations (Optional[List[Augmentation]], optional): Perform the specified augmentations to the batch or dataset. Defaults to None.
@@ -195,12 +201,14 @@ class UnifiedDataset(Dataset):
                 "incl_ped_walkways": False,
                 # Collation can be quite slow if vector maps are included,
                 # so we do not unless the user requests it.
-                "no_collate": True,
+                "collate": False,
             }
         )
         self.only_types = None if only_types is None else set(only_types)
         self.only_predict = None if only_predict is None else set(only_predict)
         self.no_types = None if no_types is None else set(no_types)
+        self.state_format = state_format
+        self.obs_format = obs_format
         self.standardize_data = standardize_data
         self.standardize_derivatives = standardize_derivatives
         self.augmentations = augmentations
@@ -208,8 +216,16 @@ class UnifiedDataset(Dataset):
         self.transforms = transforms
         self.verbose = verbose
         self.max_agent_num = max_agent_num
+        self.rank = rank
         self.max_neighbor_num = max_neighbor_num
         self.ego_only = ego_only
+
+        # Create requested state types now so pickling works
+        # (Needed for multiprocess dataloading)
+        self.np_state_type = NP_STATE_TYPES[state_format]
+        self.np_obs_type = NP_STATE_TYPES[obs_format]
+        self.torch_state_type = TORCH_STATE_TYPES[state_format]
+        self.torch_obs_type = TORCH_STATE_TYPES[obs_format]
 
         # Ensuring scene description queries are all lowercase
         if scene_description_contains is not None:
@@ -349,7 +365,7 @@ class UnifiedDataset(Dataset):
         else:
             # Build cache
             cached_batch_elements = []
-            keep_mask = []
+            keep_ids = []
 
             if num_workers <= 0:
                 cache_data_iterator = self
@@ -372,9 +388,7 @@ class UnifiedDataset(Dataset):
             ):
                 if filter_fn is None or filter_fn(element):
                     cached_batch_elements.append(element)
-                    keep_mask.append(True)
-                else:
-                    keep_mask.append(False)
+                    keep_ids.append(element.data_index)
 
             # Just deletes the variable cache_data_iterator,
             # not self (in case it is set to that)!
@@ -383,17 +397,13 @@ class UnifiedDataset(Dataset):
             print(f"Saving cache to {cache_path} ....", end="")
             t = time.time()
             with open(cache_path, "wb") as f:
-                dill.dump((cached_batch_elements, keep_mask), f)
+                dill.dump((cached_batch_elements, keep_ids), f)
             print(f" done in {time.time() - t:.1f}s.")
 
             self._cached_batch_elements = cached_batch_elements
 
-        # Verify
-        if len(keep_mask) != self._data_len:
-            raise ValueError("Current data and keep_mask lengths do not match!")
-
         # Remove unwanted elements
-        self.remove_elements(keep_mask=keep_mask)
+        self.remove_elements(keep_ids=keep_ids)
 
         # Verify
         if len(self._cached_batch_elements) != self._data_len:
@@ -403,50 +413,71 @@ class UnifiedDataset(Dataset):
         self,
         filter_fn: Callable[[Union[AgentBatchElement, SceneBatchElement]], bool],
         num_workers: int = 0,
+        max_count: Optional[int] = None,
+        all_gather: Optional[Callable] = None,
     ) -> None:
-        keep_mask = []
+        keep_ids = []
+        keep_count = 0
 
-        if num_workers <= 0:
-            cache_data_iterator = self
-        else:
-            # Use DataLoader as a generic multiprocessing framework.
-            # We set batchsize=1 and a custom collate function.
-            # In effect this will just call self.__getitem__ in parallel.
-            cache_data_iterator = DataLoader(
-                self,
-                batch_size=1,
-                num_workers=num_workers,
-                shuffle=False,
-                collate_fn=lambda xlist: xlist[0],
-            )
+        if filter_fn is None:
+            return
 
-        for element in tqdm(
-            cache_data_iterator,
-            desc=f"Filtering dataset ({num_workers} CPUs): ",
-            disable=False,
-        ):
-            if filter_fn is None or filter_fn(element):
-                keep_mask.append(True)
+        # Only do filtering with rank=0
+        if self.rank == 0:
+            if num_workers <= 0:
+                cache_data_iterator = self
             else:
-                keep_mask.append(False)
+                # Multiply num_workers by the number of torch processes, because
+                # we will only be using rank 0 process, whereas
+                # num_workers is typically defined per torch process.
+                if distributed.is_initialized():
+                    num_workers = num_workers * distributed.get_world_size()
 
-        # Just deletes the variable cache_data_iterator,
-        # not self (in case it is set to that)!
-        del cache_data_iterator
+                # Use DataLoader as a generic multiprocessing framework.
+                # We set batchsize=1 and a custom collate function.
+                # In effect this will just call self.__getitem__ in parallel.
+                cache_data_iterator = DataLoader(
+                    self,
+                    batch_size=1,
+                    num_workers=num_workers,
+                    shuffle=False,
+                    collate_fn=lambda xlist: xlist[0],
+                )
 
-        # Verify
-        if len(keep_mask) != self._data_len:
-            raise ValueError("Current data and keep_mask lengths do not match!")
+            # Iterate over data
+            for element in tqdm(
+                cache_data_iterator,
+                desc=f"Filtering dataset ({num_workers} CPUs): ",
+                disable=False,
+            ):
+                if filter_fn(element):
+                    keep_ids.append(element.data_index)
+                    keep_count += 1
+                    if max_count is not None and keep_count >= max_count:
+                        # Add False for remaining samples and break loop
+                        print(
+                            f"Reached maximum number of {max_count} elements, terminating early."
+                        )
+                        break
 
-        # Remove unwanted elements
-        self.remove_elements(keep_mask=keep_mask)
+            del cache_data_iterator
 
-    def remove_elements(self, keep_mask: List[bool]):
-        assert len(keep_mask) == self._data_len
+            # Remove unwanted elements
+            self.remove_elements(keep_ids=keep_ids)
+
+        # Wait for rank 0 process to be done with caching.
+        # Note that the default timeout is 30 minutes. If filtering is expected to exceed this, the timeout can be
+        # increased when initializing the process group, i.e., torch.distributed.init_process_group(timeout=...)
+        if distributed.is_initialized() and distributed.get_world_size() > 1:
+            gathered_values = all_gather(self._data_index)
+            # All proceses use the indices from rank 0
+            self._data_index = gathered_values[0]
+            self._data_len = len(self._data_index)
+            print(f"Rank {self.rank} has {self._data_len} elements.")
+
+    def remove_elements(self, keep_ids: Union[np.ndarray, List[int]]):
         old_len = self._data_len
-        self._data_index = [
-            self._data_index[i] for i in range(len(keep_mask)) if keep_mask[i]
-        ]
+        self._data_index = [self._data_index[i] for i in keep_ids]
         self._data_len = len(self._data_index)
 
         print(
@@ -862,6 +893,7 @@ class UnifiedDataset(Dataset):
         scene_cache: SceneCache = self.cache_class(
             self.cache_path, scene, self.augmentations
         )
+        scene_cache.set_obs_format(self.obs_format)
 
         if self.centric == "scene":
             scene_time: SceneTime = SceneTime.from_cache(
@@ -884,6 +916,7 @@ class UnifiedDataset(Dataset):
                 self.raster_map_params,
                 self._map_api,
                 self.vector_map_params,
+                self.state_format,
                 self.standardize_data,
                 self.standardize_derivatives,
                 self.max_agent_num,
@@ -911,6 +944,7 @@ class UnifiedDataset(Dataset):
                 self.raster_map_params,
                 self._map_api,
                 self.vector_map_params,
+                self.state_format,
                 self.standardize_data,
                 self.standardize_derivatives,
                 self.max_neighbor_num,
@@ -922,7 +956,7 @@ class UnifiedDataset(Dataset):
         for transform_fn in self.transforms:
             batch_element = transform_fn(batch_element)
 
-        if self.vector_map_params.get("no_collate", True):
+        if not self.vector_map_params.get("collate", False):
             batch_element.vec_map = None
 
         return batch_element

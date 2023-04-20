@@ -1,9 +1,11 @@
 from typing import Dict  # Just for type annotations
 
 import numpy as np
+from tqdm import trange
 
 from trajdata import AgentBatch, UnifiedDataset
-from trajdata.data_structures.scene_metadata import Scene  # Just for type annotations
+from trajdata.data_structures.scene_metadata import Scene
+from trajdata.data_structures.state import StateArray  # Just for type annotations
 from trajdata.simulation import SimulationScene
 
 dataset = UnifiedDataset(
@@ -24,18 +26,18 @@ sim_scene = SimulationScene(
 )
 
 obs: AgentBatch = sim_scene.reset()
-for t in range(1, sim_scene.scene.length_timesteps):
-    new_xyh_dict: Dict[str, np.ndarray] = dict()
+for t in trange(1, sim_scene.scene.length_timesteps):
+    new_xyzh_dict: Dict[str, StateArray] = dict()
 
     # Everything inside the forloop just sets
     # agents' next states to their current ones.
     for idx, agent_name in enumerate(obs.agent_name):
-        curr_yaw = obs.curr_agent_state[idx, -1]
-        curr_pos = obs.curr_agent_state[idx, :2]
+        curr_yaw = obs.curr_agent_state[idx].heading.item()
+        curr_pos = obs.curr_agent_state[idx].position.numpy()
 
-        next_state = np.zeros((3,))
+        next_state = np.zeros((4,))
         next_state[:2] = curr_pos
-        next_state[2] = curr_yaw
-        new_xyh_dict[agent_name] = next_state
+        next_state[-1] = curr_yaw
+        new_xyzh_dict[agent_name] = StateArray.from_array(next_state, "x,y,z,h")
 
-    obs = sim_scene.step(new_xyh_dict)
+    obs = sim_scene.step(new_xyzh_dict)

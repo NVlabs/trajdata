@@ -1,3 +1,4 @@
+from decimal import Decimal
 from math import ceil
 from typing import List, Optional, Set, Tuple
 
@@ -53,12 +54,12 @@ def get_valid_ts(
     """
     first_valid_ts = agent_info.first_timestep
     if history_sec[0] is not None:
-        min_history = ceil(history_sec[0] / dt)
+        min_history = ceil(Decimal(str(history_sec[0])) / Decimal(str(dt)))
         first_valid_ts += min_history
 
     last_valid_ts = agent_info.last_timestep
     if future_sec[0] is not None:
-        min_future = ceil(future_sec[0] / dt)
+        min_future = ceil(Decimal(str(future_sec[0])) / Decimal(str(dt)))
         last_valid_ts -= min_future
 
     return first_valid_ts, last_valid_ts
@@ -71,7 +72,7 @@ def satisfies_history(
     history_sec: Tuple[Optional[float], Optional[float]],
 ) -> bool:
     if history_sec[0] is not None:
-        min_history = ceil(history_sec[0] / dt)
+        min_history = ceil(Decimal(str(history_sec[0])) / Decimal(str(dt)))
         agent_history_satisfies = ts - agent_info.first_timestep >= min_history
     else:
         agent_history_satisfies = True
@@ -86,7 +87,7 @@ def satisfies_future(
     future_sec: Tuple[Optional[float], Optional[float]],
 ) -> bool:
     if future_sec[0] is not None:
-        min_future = ceil(future_sec[0] / dt)
+        min_future = ceil(Decimal(str(future_sec[0])) / Decimal(str(dt)))
         agent_future_satisfies = agent_info.last_timestep - ts >= min_future
     else:
         agent_future_satisfies = True
