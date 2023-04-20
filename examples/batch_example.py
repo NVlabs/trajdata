@@ -12,7 +12,7 @@ def main():
     noise_hists = NoiseHistories()
 
     dataset = UnifiedDataset(
-        desired_data=["nusc_mini-mini_train"],
+        desired_data=["waymo_val"],
         centric="agent",
         desired_dt=0.1,
         history_sec=(3.2, 3.2),
@@ -23,14 +23,14 @@ def main():
         incl_raster_map=True,
         raster_map_params={
             "px_per_m": 2,
-            "map_size_px": 224,
-            "offset_frac_xy": (-0.5, 0.0),
+            "map_size_px": 1024,
+            "offset_frac_xy": (-0.0, 0.0),
         },
         augmentations=[noise_hists],
         num_workers=0,
         verbose=True,
         data_dirs={  # Remember to change this to match your filesystem!
-            "nusc_mini": "~/datasets/nuScenes",
+            "waymo_val": "~/datasets/waymo",
         },
     )
 

@@ -757,7 +757,7 @@ class DataFrameCache(SceneCache):
             cache_path, vector_map.env_name, vector_map.map_name, raster_resolution
         )
 
-        pbar_kwargs = {"position": 2, "leave": False}
+        pbar_kwargs = {"position": 2, "leave": False, "disable": True}
         rasterized_map: RasterizedMap = raster_utils.rasterize_map(
             vector_map, raster_resolution, **pbar_kwargs
         )
