@@ -22,11 +22,11 @@ class MapElementKDTree:
     the coordinates we want to store in the KDTree.
     """
 
-    def __init__(self, vector_map: VectorMap) -> None:
+    def __init__(self, vector_map: VectorMap, verbose: bool = False) -> None:
         # Build kd-tree
-        self.kdtree, self.polyline_inds = self._build_kdtree(vector_map)
+        self.kdtree, self.polyline_inds = self._build_kdtree(vector_map, verbose)
 
-    def _build_kdtree(self, vector_map: VectorMap):
+    def _build_kdtree(self, vector_map: VectorMap, verbose: bool = False):
         polylines = []
         polyline_inds = []
 
@@ -36,6 +36,7 @@ class MapElementKDTree:
             desc=f"Building K-D Trees",
             leave=False,
             total=len(vector_map),
+            disable=not verbose,
         ):
             points = self._extract_points(map_elem)
             if points is not None:

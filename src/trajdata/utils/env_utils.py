@@ -32,6 +32,7 @@ except ModuleNotFoundError:
     # with the "trajdata[waymo]" option.
     pass
 
+
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nusc" in dataset_name:
         return NuscDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
