@@ -180,11 +180,7 @@ class WaymoDataset(RawDataset):
             scenario.ParseFromString(bytearray(data.numpy()))
             break
         agent_ids = []
-        agent_translations = []
-        agent_velocities = []
-        agent_yaws = []
         agent_ml_class = []
-        agent_sizes = []
 
         agents_to_remove = []
         for index, track in enumerate(scenario.tracks):
