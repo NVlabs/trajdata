@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from trajdata.maps.vec_map import VectorMap
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy.spatial import KDTree
@@ -26,7 +26,9 @@ class MapElementKDTree:
 
     def __init__(self, vector_map: VectorMap, verbose: bool = False) -> None:
         # Build kd-tree
-        self.kdtree, self.polyline_inds, self.metadata = self._build_kdtree(vector_map, verbose)
+        self.kdtree, self.polyline_inds, self.metadata = self._build_kdtree(
+            vector_map, verbose
+        )
 
     def _build_kdtree(self, vector_map: VectorMap, verbose: bool = False):
         polylines = []
