@@ -483,11 +483,11 @@ def translate_lane(
 
 def extract_traffic_lights(
     dynamic_states: List[scenario_pb2.DynamicMapState],
-) -> Dict[Tuple[int, int], TrafficLightStatus]:
-    ret: Dict[Tuple[int, int], TrafficLightStatus] = {}
+) -> Dict[Tuple[str, int], TrafficLightStatus]:
+    ret: Dict[Tuple[str, int], TrafficLightStatus] = {}
     for i, dynamic_state in enumerate(dynamic_states):
         for lane_state in dynamic_state.lane_states:
-            ret[(lane_state.lane, i)] = translate_traffic_state(lane_state.state)
+            ret[(str(lane_state.lane), i)] = translate_traffic_state(lane_state.state)
 
     return ret
 

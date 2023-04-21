@@ -312,6 +312,18 @@ class WaymoDataset(RawDataset):
             scene,
         )
 
+        tls_dict = waymo_utils.extract_traffic_lights(
+            dynamic_states=scenario.dynamic_map_states
+        )
+        tls_df = pd.DataFrame(
+            tls_dict.values(),
+            index=pd.MultiIndex.from_tuples(
+                tls_dict.keys(), names=["lane_id", "scene_ts"]
+            ),
+            columns=["status"],
+        )
+        cache_class.save_traffic_light_data(tls_df, cache_path, scene)
+
         return agent_list, agent_presence
 
     def cache_map(
@@ -334,11 +346,7 @@ class WaymoDataset(RawDataset):
             map_features=scenario.map_features,
             map_name=f"{self.name}:{self.name}_{data_idx}",
         )
-        vector_map.associate_scene_data(
-            waymo_utils.extract_traffic_lights(
-                dynamic_states=scenario.dynamic_map_states
-            )
-        )
+
         map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)
 
     def cache_maps(
