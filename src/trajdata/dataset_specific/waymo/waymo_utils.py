@@ -496,8 +496,8 @@ def translate_traffic_state(
     state: waymo_map_pb2.TrafficSignalLaneState.State,
 ) -> TrafficLightStatus:
     # TODO(bivanovic): The traffic light type doesn't align between waymo and trajdata,
-    # but I think trajdata TrafficLightStatus should include yellow light
-    # for now I let caution = red
+    # since trajdata's TrafficLightStatus does not include a yellow light yet.
+    # For now, we set caution = red.
     if state in GREEN:
         return TrafficLightStatus.GREEN
     if state in RED:
