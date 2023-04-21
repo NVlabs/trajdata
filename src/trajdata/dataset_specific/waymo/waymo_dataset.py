@@ -330,14 +330,10 @@ class WaymoDataset(RawDataset):
             scenario.ParseFromString(bytearray(data.numpy()))
             break
 
-        vector_map_proto: VectorizedMap = waymo_utils.extract_vectorized(
+        vector_map: VectorMap = waymo_utils.extract_vectorized(
             map_features=scenario.map_features,
             map_name=f"{self.name}:{self.name}_{data_idx}",
         )
-        vector_map: VectorMap = VectorMap.from_proto(
-            vector_map_proto, incl_road_lanes=True, incl_ped_crosswalks=True
-        )
-
         vector_map.associate_scene_data(
             waymo_utils.extract_traffic_lights(
                 dynamic_states=scenario.dynamic_map_states

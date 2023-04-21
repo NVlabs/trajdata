@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from subprocess import check_call, check_output
-from typing import Dict, Final, List, Optional, Set, Tuple, Union
+from typing import Dict, Final, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,8 @@ from tqdm import tqdm
 from waymo_open_dataset.protos import map_pb2 as waymo_map_pb2
 from waymo_open_dataset.protos import scenario_pb2
 
-from trajdata.maps import TrafficLightStatus
+from trajdata.maps import TrafficLightStatus, VectorMap
+from trajdata.maps.vec_map_elements import PedCrosswalk, Polyline, RoadLane
 from trajdata.proto import vectorized_map_pb2
 
 WAYMO_DT: Final[float] = 0.1
@@ -146,47 +147,71 @@ class WaymoScenarios:
 
 def extract_vectorized(
     map_features: List[waymo_map_pb2.MapFeature], map_name: str, verbose: bool = False
-) -> vectorized_map_pb2.VectorizedMap:
-    vec_map = vectorized_map_pb2.VectorizedMap()
-    vec_map.name = map_name
-    vec_map.shifted_origin.x = 0.0
-    vec_map.shifted_origin.y = 0.0
-    vec_map.shifted_origin.z = 0.0
+) -> VectorMap:
+    vec_map = VectorMap(map_id=map_name)
 
     max_pt = np.array([np.nan, np.nan, np.nan])
     min_pt = np.array([np.nan, np.nan, np.nan])
 
-    boundaries = {}
+    boundaries: Dict[int, Polyline] = {}
     for map_feature in tqdm(
         map_features, desc="Extracting road boundaries", disable=not verbose
     ):
         if map_feature.WhichOneof("feature_data") == "road_line":
-            boundaries[map_feature.id] = map_feature.road_line.polyline
+            boundaries[map_feature.id] = Polyline(
+                np.array([(pt.x, pt.y, pt.z) for pt in map_feature.road_line.polyline])
+            )
         elif map_feature.WhichOneof("feature_data") == "road_edge":
-            boundaries[map_feature.id] = map_feature.road_edge.polyline
+            boundaries[map_feature.id] = Polyline(
+                np.array([(pt.x, pt.y, pt.z) for pt in map_feature.road_edge.polyline])
+            )
 
     for map_feature in tqdm(
         map_features, desc="Extracting map elements", disable=not verbose
     ):
         if map_feature.WhichOneof("feature_data") == "lane":
-            temp_max_pt, temp_min_pt, modified_lane_ids = translate_lane(
-                vec_map, map_feature, boundaries
-            )
+            if len(map_feature.lane.polyline) == 1:
+                # TODO: Why does Waymo have single-point polylines that
+                # aren't interpolating between others??
+                continue
+
+            road_lanes, modified_lane_ids = translate_lane(map_feature, boundaries)
+            for road_lane in road_lanes:
+                vec_map.add_map_element(road_lane)
+
+                max_pt = np.fmax(max_pt, road_lane.center.xyz.max(axis=0))
+                min_pt = np.fmin(min_pt, road_lane.center.xyz.min(axis=0))
+
+                if road_lane.left_edge:
+                    max_pt = np.fmax(max_pt, road_lane.left_edge.xyz.max(axis=0))
+                    min_pt = np.fmin(min_pt, road_lane.left_edge.xyz.min(axis=0))
+
+                if road_lane.right_edge:
+                    max_pt = np.fmax(max_pt, road_lane.right_edge.xyz.max(axis=0))
+                    min_pt = np.fmin(min_pt, road_lane.right_edge.xyz.min(axis=0))
+
         elif map_feature.WhichOneof("feature_data") == "crosswalk":
-            new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
-            new_element.id = bytes(map_feature.id)
-            temp_max_pt, temp_min_pt = translate_crosswalk(
-                new_element.ped_crosswalk, map_feature.crosswalk
+            crosswalk = PedCrosswalk(
+                id=str(map_feature.id),
+                polygon=Polyline(
+                    np.array(
+                        [(pt.x, pt.y, pt.z) for pt in map_feature.crosswalk.polygon]
+                    )
+                ),
             )
+            vec_map.add_map_element(crosswalk)
+
+            max_pt = np.fmax(max_pt, crosswalk.polygon.xyz.max(axis=0))
+            min_pt = np.fmin(min_pt, crosswalk.polygon.xyz.min(axis=0))
+
         else:
             continue
 
-        max_pt = np.fmax(max_pt, temp_max_pt)
-        min_pt = np.fmin(min_pt, temp_min_pt)
+    # TODO: Correct lane connectivity (because of lane chunking and IDs).
 
-    (vec_map.max_pt.x, vec_map.max_pt.y, vec_map.max_pt.z) = max_pt
-
-    (vec_map.min_pt.x, vec_map.min_pt.y, vec_map.min_pt.z) = min_pt
+    # Setting the map bounds.
+    # vec_map.extent is [min_x, min_y, min_z, max_x, max_y, max_z]
+    vec_map.extent = np.concatenate((min_pt, max_pt))
 
     return vec_map
 
@@ -201,30 +226,6 @@ def translate_agent_type(agent_type):
     elif agent_type == scenario_pb2.Track.ObjectType.OTHER:
         return AgentType.UNKNOWN
     return -1
-
-
-def translate_polyline(
-    ret: vectorized_map_pb2.Polyline, polyline: List[waymo_map_pb2.MapPoint]
-) -> Tuple[List[float], List[float]]:
-    points = [[point.x, point.y, point.z] for point in polyline]
-    shifted_points = [[0.0, 0.0, 0.0]] + points
-    shifted_points.pop(-1)
-
-    points = np.array(points)
-    shifted_points = np.array(shifted_points)
-    max_pt = np.max(points, axis=0)
-    min_pt = np.min(points, axis=0)
-    ret_polyline = (np.array(points) - np.array(shifted_points)) * 1000
-    ret_dx = ret_polyline[:, 0]
-    ret_dy = ret_polyline[:, 1]
-    ret_dz = ret_polyline[:, 2]
-    ret_h = np.arctan2(ret_dy, ret_dx)
-    ret.dx_mm.extend(ret_dx.astype(int).tolist())
-    ret.dy_mm.extend(ret_dy.astype(int).tolist())
-    ret.dz_mm.extend(ret_dz.astype(int).tolist())
-    ret.h_rad.extend(ret_h)
-
-    return max_pt, min_pt
 
 
 def is_full_boundary(lane_boundaries, num_lane_indices: int) -> bool:
@@ -248,47 +249,33 @@ def is_full_boundary(lane_boundaries, num_lane_indices: int) -> bool:
     return covers_all
 
 
-def _merge_interval_data(
-    data1: Union[Tuple[str, int], str], data2: Union[Tuple[str, int], str]
-) -> Tuple[str, Set[int], Set[int]]:
-    if data1[0] == data2[0] == "none":
-        return ("none", set(), set())
+def _merge_interval_data(data1: str, data2: str) -> str:
+    if data1 == data2 == "none":
+        return "none"
 
-    if data1[0] == "none" and data2[0] != "none":
+    if data1 == "none" and data2 != "none":
         return data2
 
-    if data1[0] != "none" and data2[0] == "none":
+    if data1 != "none" and data2 == "none":
         return data1
 
-    if data1[0] != "none" and data2[0] != "none":
-        return ("both", data1[1] | data2[1], data1[2] | data2[2])
+    if data1 != "none" and data2 != "none":
+        return "both"
 
 
 def split_lane_into_chunks(
-    lane: waymo_map_pb2.LaneCenter, boundaries: Dict[int, List[waymo_map_pb2.MapPoint]]
-) -> List[Interval]:
-    # The data here is (lane_edges_available, left_boundary_ids, right_boundary_ids).
-    left_boundaries = [
-        (
-            b.lane_start_index,
-            b.lane_end_index + 1,
-            ("left", set([b.boundary_feature_id]), set()),
-        )
-        for b in lane.left_boundaries
-    ]
-    right_boundaries = [
-        (
-            b.lane_start_index,
-            b.lane_end_index + 1,
-            ("right", set(), set([b.boundary_feature_id])),
-        )
-        for b in lane.right_boundaries
-    ]
-
+    lane: waymo_map_pb2.LaneCenter, boundaries: Dict[int, Polyline]
+) -> List[Tuple[Polyline, Optional[Polyline], Optional[Polyline]]]:
     boundary_intervals = IntervalTree.from_tuples(
-        left_boundaries
-        + right_boundaries
-        + [(0, len(lane.polyline), ("none", set(), set()))]
+        [
+            (b.lane_start_index, b.lane_end_index + 1, "left")
+            for b in lane.left_boundaries
+        ]
+        + [
+            (b.lane_start_index, b.lane_end_index + 1, "right")
+            for b in lane.right_boundaries
+        ]
+        + [(0, len(lane.polyline), "none")]
     )
 
     boundary_intervals.split_overlaps()
@@ -298,44 +285,77 @@ def split_lane_into_chunks(
 
     if len(intervals) > 1:
         merged_intervals: List[Interval] = [intervals.pop(0)]
-        for _ in range(len(intervals)):
-            if (
-                merged_intervals[-1].data == intervals[0].data
-                and merged_intervals[-1].end == intervals[0].begin
-            ):
-                combined_data = (
-                    merged_intervals[-1].data[0],
-                    merged_intervals[-1].data[1] | intervals[0].data[1],
-                    merged_intervals[-1].data[2] | intervals[0].data[2],
-                )
+        while intervals:
+            last_interval: Interval = merged_intervals[-1]
+            curr_interval: Interval = intervals.pop(0)
+
+            if last_interval.end != curr_interval.begin:
+                raise ValueError("Non-consecutive intervals in merging!")
+
+            if last_interval.data == curr_interval.data:
+                # Simple merging of same-data neighbors.
                 merged_intervals[-1] = Interval(
-                    merged_intervals[-1].begin,
-                    intervals[0].end,
-                    combined_data,
+                    last_interval.begin,
+                    curr_interval.end,
+                    last_interval.data,
                 )
-                intervals.pop(0)
+            elif (
+                last_interval.end - last_interval.begin == 1
+                or curr_interval.end - curr_interval.begin == 1
+            ):
+                # Trying to remove 1-length chunks by merging them with neighbors.
+                data_to_keep: str = (
+                    curr_interval.data
+                    if curr_interval.end - curr_interval.begin
+                    > last_interval.end - last_interval.begin
+                    else last_interval.data
+                )
+
+                merged_intervals[-1] = Interval(
+                    last_interval.begin,
+                    curr_interval.end,
+                    data_to_keep,
+                )
             else:
-                merged_intervals.append(intervals.pop(0))
+                merged_intervals.append(curr_interval)
+
         intervals = merged_intervals
 
-    left_boundary_tree = IntervalTree.from_tuples(left_boundaries)
-    right_boundary_tree = IntervalTree.from_tuples(right_boundaries)
-    lane_chunk_data: List[Tuple] = []
+    left_boundary_tree = IntervalTree.from_tuples(
+        [
+            (b.lane_start_index, b.lane_end_index + 1, b.boundary_feature_id)
+            for b in lane.left_boundaries
+        ]
+    )
+    right_boundary_tree = IntervalTree.from_tuples(
+        [
+            (b.lane_start_index, b.lane_end_index + 1, b.boundary_feature_id)
+            for b in lane.right_boundaries
+        ]
+    )
+    lane_chunk_data: List[Tuple[Polyline, Optional[Polyline], Optional[Polyline]]] = []
     for interval in intervals:
-        center_chunk = lane.polyline[interval.begin : interval.end]
-        if interval.data[0] == "none":
+        center_chunk = Polyline(
+            np.array(
+                [
+                    (point.x, point.y, point.z)
+                    for point in lane.polyline[interval.begin : interval.end]
+                ]
+            )
+        )
+        if interval.data == "none":
             lane_chunk_data.append((center_chunk, None, None))
-        elif interval.data[0] == "left":
+        elif interval.data == "left":
             left_chunk = subselect_boundary(
                 boundaries, center_chunk, interval, left_boundary_tree
             )
             lane_chunk_data.append((center_chunk, left_chunk, None))
-        elif interval.data[0] == "right":
+        elif interval.data == "right":
             right_chunk = subselect_boundary(
                 boundaries, center_chunk, interval, right_boundary_tree
             )
             lane_chunk_data.append((center_chunk, None, right_chunk))
-        elif interval.data[0] == "both":
+        elif interval.data == "both":
             left_chunk = subselect_boundary(
                 boundaries, center_chunk, interval, left_boundary_tree
             )
@@ -350,86 +370,115 @@ def split_lane_into_chunks(
 
 
 def subselect_boundary(
-    boundaries: Dict[int, List[waymo_map_pb2.MapPoint]],
-    lane_center: List[waymo_map_pb2.MapPoint],
-    interval: Interval,
+    boundaries: Dict[int, Polyline],
+    lane_center: Polyline,
+    chunk_interval: Interval,
     boundary_tree: IntervalTree,
-) -> List[waymo_map_pb2.MapPoint]:
-    print()
-    relevant_indices = boundary_tree
+) -> Polyline:
+    relevant_boundaries: List[Interval] = sorted(
+        boundary_tree[chunk_interval.begin : chunk_interval.end]
+    )
+
+    if (
+        len(relevant_boundaries) == 1
+        and relevant_boundaries[0].begin == chunk_interval.begin
+        and relevant_boundaries[0].end == chunk_interval.end
+    ):
+        # Return immediately for an exact match.
+        return boundaries[relevant_boundaries[0].data]
+
+    polyline_pts: List[Polyline] = []
+    for boundary_interval in relevant_boundaries:
+        # Below we are trying to find relevant boundary regions to the current lane chunk center
+        # by projecting the boundary onto the lane and seeing where it stops following the center.
+        # After that point, the projections will cease to change
+        # (they will typically all be the last point of the center line).
+        boundary = boundaries[boundary_interval.data]
+
+        if boundary.points.shape[0] == 1:
+            polyline_pts.append(boundary.points)
+            continue
+
+        proj = lane_center.project_onto(boundary.points)
+        local_diffs = np.diff(proj, axis=0, append=proj[[-1]] - proj[[-2]])
+
+        nonzero_mask = (local_diffs != 0.0).any(axis=1)
+        nonzero_idxs = np.nonzero(nonzero_mask)[0]
+        marker_idx = np.nonzero(np.ediff1d(nonzero_idxs, to_begin=[2]) > 1)[0]
+
+        # TODO(bivanovic): Only taking the first group. Adding 1 to the
+        # first ends because it otherwise ignores the first element of
+        # the repeated value group.
+        start = np.minimum.reduceat(nonzero_idxs, marker_idx)[0]
+        end = np.maximum.reduceat(nonzero_idxs, marker_idx)[0] + 1
+
+        # TODO(bivanovic): This may or may not end up being a problem, but
+        # polyline_pts[0][-1] and polyline_pts[1][0] can be exactly identical.
+        polyline_pts.append(boundary.points[start : end + 1])
+
+    return Polyline(points=np.concatenate(polyline_pts, axis=0))
 
 
 def translate_lane(
-    vec_map: vectorized_map_pb2.VectorizedMap,
     map_feature: waymo_map_pb2.MapFeature,
-    boundaries: Dict[int, List[waymo_map_pb2.MapPoint]],
-) -> Tuple[List[float], List[float], Optional[Dict[int, List[bytes]]]]:
+    boundaries: Dict[int, Polyline],
+) -> Tuple[RoadLane, Optional[Dict[int, List[bytes]]]]:
     lane: waymo_map_pb2.LaneCenter = map_feature.lane
 
-    modified_lane_ids = None
     if lane.left_boundaries or lane.right_boundaries:
         # Waymo lane boundaries are... complicated. See
         # https://github.com/waymo-research/waymo-open-dataset/issues/389
         # for more information. For now, we split lanes into chunks which
         # have consistent lane boundaries (either both left and right,
         # one of them, or none).
-        intervals = split_lane_into_chunks(lane, boundaries)
-        for idx, interval in enumerate(intervals):
-            new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
-            new_element.id = bytes(f"{map_feature.id}_{idx}")
-            road_lane: vectorized_map_pb2.RoadLane = new_element.road_lane
-
-            max_point, min_point = translate_polyline(road_lane.center, lane.polyline)
+        lane_chunks = split_lane_into_chunks(lane, boundaries)
+        road_lanes: List[RoadLane] = []
+        new_ids: List[bytes] = []
+        for idx, (lane_center, left_edge, right_edge) in enumerate(lane_chunks):
+            road_lane = RoadLane(
+                id=f"{map_feature.id}_{idx}",
+                center=lane_center,
+                left_edge=left_edge,
+                right_edge=right_edge,
+            )
+            new_ids.append(road_lane.id)
 
             if idx == 0:
-                road_lane.entry_lanes.extend(
-                    np.array(lane.entry_lanes).astype(bytes).tolist()
-                )
+                road_lane.prev_lanes.update([str(eid) for eid in lane.entry_lanes])
             else:
-                road_lane.entry_lanes.append(bytes(f"{map_feature.id}_{idx-1}"))
+                road_lane.prev_lanes.add(f"{map_feature.id}_{idx-1}")
 
-            if idx == len(intervals) - 1:
-                road_lane.exit_lanes.extend(
-                    np.array(lane.exit_lanes).astype(bytes).tolist()
-                )
+            if idx == len(lane_chunks) - 1:
+                road_lane.next_lanes.update([str(eid) for eid in lane.exit_lanes])
             else:
-                road_lane.exit_lanes.append(bytes(f"{map_feature.id}_{idx+1}"))
+                road_lane.next_lanes.add(f"{map_feature.id}_{idx+1}")
 
             for neighbor in lane.left_neighbors:
-                road_lane.adjacent_lanes_left.append(bytes(neighbor.feature_id))
+                road_lane.adj_lanes_left.add(str(neighbor.feature_id))
 
             for neighbor in lane.right_neighbors:
-                road_lane.adjacent_lanes_right.append(bytes(neighbor.feature_id))
+                road_lane.adj_lanes_right.add(str(neighbor.feature_id))
 
-            if interval.data == "both":
-                pass
+            road_lanes.append(road_lane)
 
-        modified_lane_ids = {map_feature.id: intervals}
+        return road_lanes, {map_feature.id: new_ids}
 
     else:
-        new_element: vectorized_map_pb2.MapElement = vec_map.elements.add()
-        new_element.id = bytes(map_feature.id)
-        road_lane: vectorized_map_pb2.RoadLane = new_element.road_lane
+        road_lane = RoadLane(
+            id=str(map_feature.id),
+            center=Polyline(np.array([(pt.x, pt.y, pt.z) for pt in lane.polyline])),
+        )
 
-        max_point, min_point = translate_polyline(road_lane.center, lane.polyline)
-
-        road_lane.entry_lanes.extend(np.array(lane.entry_lanes).astype(bytes).tolist())
-        road_lane.exit_lanes.extend(np.array(lane.exit_lanes).astype(bytes).tolist())
+        road_lane.prev_lanes.update([str(eid) for eid in lane.entry_lanes])
+        road_lane.next_lanes.update([str(eid) for eid in lane.exit_lanes])
 
         for neighbor in lane.left_neighbors:
-            road_lane.adjacent_lanes_left.append(bytes(neighbor.feature_id))
+            road_lane.adj_lanes_left.add(str(neighbor.feature_id))
 
         for neighbor in lane.right_neighbors:
-            road_lane.adjacent_lanes_right.append(bytes(neighbor.feature_id))
+            road_lane.adj_lanes_right.add(str(neighbor.feature_id))
 
-    return max_point, min_point, modified_lane_ids
-
-
-def translate_crosswalk(
-    ret: vectorized_map_pb2.PedCrosswalk, lane: waymo_map_pb2.Crosswalk
-) -> Tuple[List[int], List[int]]:
-    max_pt, min_pt = translate_polyline(ret.polygon, lane.polygon)
-    return max_pt, min_pt
+        return [road_lane], None
 
 
 def extract_traffic_lights(
