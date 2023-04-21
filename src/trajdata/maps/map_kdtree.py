@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from trajdata.maps.vec_map import VectorMap
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy.spatial import KDTree

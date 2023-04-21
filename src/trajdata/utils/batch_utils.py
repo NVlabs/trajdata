@@ -1,16 +1,102 @@
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
+from torch.utils.data import Sampler
 
+from trajdata import UnifiedDataset
 from trajdata.data_structures import (
     AgentBatch,
     AgentBatchElement,
+    AgentDataIndex,
     AgentType,
     SceneBatchElement,
     SceneTimeAgent,
 )
 from trajdata.data_structures.collation import agent_collate_fn
+
+
+class SceneTimeBatcher(Sampler):
+    _agent_data_index: AgentDataIndex
+    _agent_idx: int
+
+    def __init__(
+        self, agent_centric_dataset: UnifiedDataset, agent_idx_to_follow: int = 0
+    ) -> None:
+        """
+        Returns a sampler (to be used in a torch.utils.data.DataLoader)
+        which works with an agent-centric UnifiedDataset, yielding
+        batches consisting of whole scenes (AgentBatchElements for all agents
+        in a particular scene at a particular time)
+
+        Args:
+            agent_centric_dataset (UnifiedDataset)
+            agent_idx_to_follow (int): index of agent to return batches for. Defaults to 0,
+                meaning we include all scene frames where the ego agent appears, which
+                usually covers the entire dataset.
+        """
+        super().__init__(agent_centric_dataset)
+        self._agent_data_index = agent_centric_dataset._data_index
+        self._agent_idx = agent_idx_to_follow
+        self._cumulative_lengths = np.concatenate(
+            [
+                [0],
+                np.cumsum(
+                    [
+                        cumulative_scene_length[self._agent_idx + 1]
+                        - cumulative_scene_length[self._agent_idx]
+                        for cumulative_scene_length in self._agent_data_index._cumulative_scene_lengths
+                    ]
+                ),
+            ]
+        )
+
+    def __len__(self):
+        return self._cumulative_lengths[-1]
+
+    def __iter__(self) -> Iterator[int]:
+        for idx in range(len(self)):
+            # TODO(apoorvas) May not need to do this search, since we only support an iterable style access?
+            scene_idx: int = (
+                np.searchsorted(self._cumulative_lengths, idx, side="right").item() - 1
+            )
+
+            # offset into dataset index to reach current scene
+            scene_offset = self._agent_data_index._cumulative_lengths[scene_idx].item()
+
+            # how far along we are in the current scene
+            scene_elem_index = idx - self._cumulative_lengths[scene_idx].item()
+
+            # convert to scene-timestep for the tracked agent
+            scene_ts = (
+                scene_elem_index
+                + self._agent_data_index._agent_times[scene_idx][self._agent_idx, 0]
+            )
+
+            # build a set of indices into the agent-centric dataset for all agents that exist at this scene and timestep
+            indices = []
+            for agent_idx, agent_times in enumerate(
+                self._agent_data_index._agent_times[scene_idx]
+            ):
+                if scene_ts > agent_times[1]:
+                    # we are past the last timestep for this agent (times are inclusive)
+                    continue
+                agent_offset = scene_ts - agent_times[0]
+                if agent_offset < 0:
+                    # this agent hasn't entered the scene yet
+                    continue
+
+                # compute index into original dataset, first into scene, then into this agent's part in scene, and then the offset
+                index_to_add = (
+                    scene_offset
+                    + self._agent_data_index._cumulative_scene_lengths[scene_idx][
+                        agent_idx
+                    ]
+                    + agent_offset
+                )
+                indices.append(index_to_add)
+
+            yield indices
 
 
 def convert_to_agent_batch(

@@ -5,7 +5,8 @@ import torch
 
 from trajdata import AgentType, UnifiedDataset
 from trajdata.caching.env_cache import EnvCache
-from trajdata.utils.batch_utils import convert_to_agent_batch
+from trajdata.data_structures import AgentBatch
+from trajdata.utils.batch_utils import SceneTimeBatcher, convert_to_agent_batch
 
 
 class TestSceneToAgentBatchConversion(unittest.TestCase):
@@ -200,5 +201,77 @@ class TestSceneToAgentBatchConversion(unittest.TestCase):
         self._test_agent_idx(222, verbose=False)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestSceneSampler(unittest.TestCase):
+    def setUp(self) -> None:
+        self._scene_dataset = UnifiedDataset(
+            centric="scene",
+            desired_data=["nusc_mini-mini_val"],
+            data_dirs={
+                "nusc_mini": "~/datasets/nuScenes",
+            },
+        )
+
+        self._agent_dataset = UnifiedDataset(
+            centric="agent",
+            desired_data=["nusc_mini-mini_val"],
+            data_dirs={
+                "nusc_mini": "~/datasets/nuScenes",
+            },
+        )
+
+        self._scene_sampler = SceneTimeBatcher(self._agent_dataset)
+
+    def _test_len(self, agent_idx=0):
+        """
+        Len of dataset should be equal to number of timesteps
+        the agent appears in the dataset
+        """
+        sampler = SceneTimeBatcher(self._agent_dataset, agent_idx)
+
+        total_len = sum(
+            lengths[agent_idx + 1] - lengths[agent_idx]
+            for lengths in self._agent_dataset._data_index._cumulative_scene_lengths
+        )
+
+        dl = torch.utils.data.DataLoader(self._agent_dataset, batch_sampler=sampler)
+
+        self.assertEqual(len(dl), total_len)
+
+    def test_len_ego(self):
+        self.assertEqual(len(self._scene_sampler), len(self._scene_dataset))
+
+    def test_len_nonego_1(self):
+        return self._test_len(15)
+
+    def test_len_nonego_2(self):
+        return self._test_len(30)
+
+    def test_consistency(self):
+        dl = torch.utils.data.DataLoader(
+            self._agent_dataset,
+            batch_sampler=self._scene_sampler,
+            collate_fn=self._agent_dataset.get_collate_fn(pad_format="right"),
+        )
+        scene_idx = 0
+        agent_batch: AgentBatch
+        for agent_batch in dl:
+            scene_batch_elem = self._scene_dataset[scene_idx]
+            for scene_id in agent_batch.scene_ids:
+                self.assertEqual(scene_batch_elem.scene_id, scene_id)
+
+            # ensure all elements have the same scene id
+            self.assertEqual(
+                torch.abs(agent_batch.scene_ts - scene_batch_elem.scene_ts)
+                .float()
+                .mean()
+                .item(),
+                0,
+            )
+
+            for agent_name in agent_batch.agent_name:
+                self.assertIn(agent_name, scene_batch_elem.agent_names)
+
+            scene_idx += 1
+
+            if scene_idx == 10:
+                break

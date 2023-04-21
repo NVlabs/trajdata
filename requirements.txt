@@ -8,6 +8,7 @@ pyarrow
 torch
 zarr
 kornia
+bokeh
 
 # nuScenes devkit
 nuscenes-devkit==1.1.9

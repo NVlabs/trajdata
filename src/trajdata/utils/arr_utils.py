@@ -164,7 +164,7 @@ def transform_coords_2d_np(
     """
     Args:
         coords (np.ndarray): [..., 2] coordinates
-        offset (Optional[np.ndarray], optional): [..., 2] offset to transalte. Defaults to None.
+        offset (Optional[np.ndarray], optional): [..., 2] offset to translate. Defaults to None.
         angle (Optional[np.ndarray], optional): [...] angle to rotate by. Defaults to None.
         rot_mat (Optional[np.ndarray], optional): [..., 2,2] rotation matrix to apply. Defaults to None.
             If rot_mat is given, angle is ignored.
@@ -172,14 +172,14 @@ def transform_coords_2d_np(
     Returns:
         np.ndarray: transformed coords
     """
-    if offset is not None:
-        coords = coords + offset
-
     if rot_mat is None and angle is not None:
         rot_mat = rotation_matrix(angle)
 
     if rot_mat is not None:
         coords = np.einsum("...ij,...j->...i", rot_mat, coords)
+
+    if offset is not None:
+        coords += offset
 
     return coords
 
@@ -240,7 +240,7 @@ def transform_xyh_np(xyh: np.ndarray, tf_mat: np.ndarray) -> np.ndarray:
         tf_mat (np.ndarray): shape [...,3,3]
     """
     transformed_xy = transform_coords_np(xyh[..., :2], tf_mat)
-    transformed_angles = transform_angles_np(xyh[..., 3], tf_mat)
+    transformed_angles = transform_angles_np(xyh[..., 2], tf_mat)
     return np.concatenate([transformed_xy, transformed_angles[..., None]], axis=-1)
 
 

@@ -340,7 +340,7 @@ class StateTensor(State, Tensor):
     _FUNCS = {
         "cos": torch.cos,
         "sin": torch.sin,
-        "arctan": torch.arctan2,
+        "arctan": torch.atan2,
         "lon_component": lon_component,
         "lat_component": lat_component,
         "x_component": x_component,
