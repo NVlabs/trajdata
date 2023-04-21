@@ -211,7 +211,6 @@ def extract_vectorized(
         else:
             continue
 
-    # TODO: Correct lane connectivity (because of lane chunking and IDs).
     for elem in vec_map.iter_elems():
         if not isinstance(elem, RoadLane):
             continue
