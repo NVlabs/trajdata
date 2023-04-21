@@ -166,6 +166,7 @@ def extract_vectorized(
                 np.array([(pt.x, pt.y, pt.z) for pt in map_feature.road_edge.polyline])
             )
 
+    lane_id_remap_dict = {}
     for map_feature in tqdm(
         map_features, desc="Extracting map elements", disable=not verbose
     ):
@@ -176,6 +177,9 @@ def extract_vectorized(
                 continue
 
             road_lanes, modified_lane_ids = translate_lane(map_feature, boundaries)
+            if modified_lane_ids:
+                lane_id_remap_dict.update(modified_lane_ids)
+
             for road_lane in road_lanes:
                 vec_map.add_map_element(road_lane)
 
@@ -208,6 +212,55 @@ def extract_vectorized(
             continue
 
     # TODO: Correct lane connectivity (because of lane chunking and IDs).
+    for elem in vec_map.iter_elems():
+        if not isinstance(elem, RoadLane):
+            continue
+
+        to_remove = set()
+        to_add = set()
+        for l_id in elem.adj_lanes_left:
+            if l_id in lane_id_remap_dict:
+                # Remove the original lanes, replace them with our chunked versions.
+                to_remove.add(l_id)
+                to_add.update(lane_id_remap_dict[l_id])
+
+        elem.adj_lanes_left -= to_remove
+        elem.adj_lanes_left |= to_add
+
+        to_remove = set()
+        to_add = set()
+        for l_id in elem.adj_lanes_right:
+            if l_id in lane_id_remap_dict:
+                # Remove the original lanes, replace them with our chunked versions.
+                to_remove.add(l_id)
+                to_add.update(lane_id_remap_dict[l_id])
+
+        elem.adj_lanes_right -= to_remove
+        elem.adj_lanes_right |= to_add
+
+        to_remove = set()
+        to_add = set()
+        for l_id in elem.prev_lanes:
+            if l_id in lane_id_remap_dict:
+                # Remove the original prev lanes, replace them with
+                # the tail of our equivalent chunked version.
+                to_remove.add(l_id)
+                to_add.add(lane_id_remap_dict[l_id][-1])
+
+        elem.prev_lanes -= to_remove
+        elem.prev_lanes |= to_add
+
+        to_remove = set()
+        to_add = set()
+        for l_id in elem.next_lanes:
+            if l_id in lane_id_remap_dict:
+                # Remove the original prev lanes, replace them with
+                # the first of our equivalent chunked version.
+                to_remove.add(l_id)
+                to_add.add(lane_id_remap_dict[l_id][0])
+
+        elem.next_lanes -= to_remove
+        elem.next_lanes |= to_add
 
     # Setting the map bounds.
     # vec_map.extent is [min_x, min_y, min_z, max_x, max_y, max_z]
@@ -436,7 +489,9 @@ def translate_lane(
         new_ids: List[bytes] = []
         for idx, (lane_center, left_edge, right_edge) in enumerate(lane_chunks):
             road_lane = RoadLane(
-                id=f"{map_feature.id}_{idx}",
+                id=f"{map_feature.id}_{idx}"
+                if len(lane_chunks) > 1
+                else str(map_feature.id),
                 center=lane_center,
                 left_edge=left_edge,
                 right_edge=right_edge,
@@ -453,6 +508,7 @@ def translate_lane(
             else:
                 road_lane.next_lanes.add(f"{map_feature.id}_{idx+1}")
 
+            # We'll take care of reassigning these IDs to the chunked versions later.
             for neighbor in lane.left_neighbors:
                 road_lane.adj_lanes_left.add(str(neighbor.feature_id))
 
@@ -461,7 +517,10 @@ def translate_lane(
 
             road_lanes.append(road_lane)
 
-        return road_lanes, {map_feature.id: new_ids}
+        if len(lane_chunks) > 1:
+            return road_lanes, {str(map_feature.id): new_ids}
+        else:
+            return road_lanes, None
 
     else:
         road_lane = RoadLane(
