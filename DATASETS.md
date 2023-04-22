@@ -16,6 +16,44 @@ It should look like this after downloading:
 
 **Note**: At a minimum, only the annotations need to be downloaded (not the raw radar/camera/lidar/etc data).
 
+## nuPlan
+Nothing special needs to be done for the nuPlan dataset, simply download v1.1 as per [the instructions in the devkit documentation](https://nuplan-devkit.readthedocs.io/en/latest/dataset_setup.html).
+
+It should look like this after downloading:
+```
+/path/to/nuPlan/
+            └── dataset
+                ├── maps
+                │   ├── nuplan-maps-v1.0.json
+                │   ├── sg-one-north
+                │   │   └── 9.17.1964
+                │   │       └── map.gpkg
+                │   ├── us-ma-boston
+                │   │   └── 9.12.1817
+                │   │       └── map.gpkg
+                │   ├── us-nv-las-vegas-strip
+                │   │   └── 9.15.1915
+                │   │       ├── drivable_area.npy.npz
+                │   │       ├── Intensity.npy.npz
+                │   │       └── map.gpkg
+                │   └── us-pa-pittsburgh-hazelwood
+                │       └── 9.17.1937
+                │           └── map.gpkg
+                └── nuplan-v1.1
+                    ├── mini
+                    │   ├── 2021.05.12.22.00.38_veh-35_01008_01518.db
+                    │   ├── 2021.06.09.17.23.18_veh-38_00773_01140.db
+                    │   ├── ...
+                    │   └── 2021.10.11.08.31.07_veh-50_01750_01948.db
+                    └── trainval
+                        ├── 2021.05.12.22.00.38_veh-35_01008_01518.db
+                        ├── 2021.06.09.17.23.18_veh-38_00773_01140.db
+                        ├── ...
+                        └── 2021.10.11.08.31.07_veh-50_01750_01948.db
+```
+
+**Note**: Not all dataset splits need to be downloaded. For example, you can download only the nuPlan Mini Split in case you only need a small sample dataset.
+
 ## Lyft Level 5
 Nothing special needs to be done for the Lyft Level 5 dataset, simply install it as per [the instructions on the dataset website](https://woven-planet.github.io/l5kit/dataset.html).
 

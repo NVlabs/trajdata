@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tqdm import tqdm
-
 if TYPE_CHECKING:
     from trajdata.maps import map_kdtree, vec_map
 
@@ -14,7 +12,6 @@ import dill
 import numpy as np
 from scipy.stats import circmean
 
-import trajdata.maps.vec_map_elements as vec_map_elems
 import trajdata.proto.vectorized_map_pb2 as map_proto
 from trajdata.utils import arr_utils
 
