@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from subprocess import check_call, check_output
-from typing import Dict, Final, List, Optional, Tuple, Union
+from typing import Dict, Final, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,6 @@ from waymo_open_dataset.protos import scenario_pb2
 
 from trajdata.maps import TrafficLightStatus, VectorMap
 from trajdata.maps.vec_map_elements import PedCrosswalk, Polyline, RoadLane
-from trajdata.proto import vectorized_map_pb2
 
 WAYMO_DT: Final[float] = 0.1
 WAYMO_DATASET_NAMES = [

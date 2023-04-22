@@ -46,7 +46,6 @@ from trajdata.data_structures import (
     scene_collate_fn,
 )
 from trajdata.dataset_specific import RawDataset
-from trajdata.maps import VectorMap
 from trajdata.maps.map_api import MapAPI
 from trajdata.parallel import ParallelDatasetPreprocessor, scene_paths_collate_fn
 from trajdata.utils import agent_utils, env_utils, scene_utils, string_utils
