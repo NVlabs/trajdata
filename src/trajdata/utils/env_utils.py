@@ -25,6 +25,13 @@ except ModuleNotFoundError:
     # with the "trajdata[nuplan]" option.
     pass
 
+try:
+    from trajdata.dataset_specific.waymo import WaymoDataset
+except ModuleNotFoundError:
+    # This can happen if the user did not install trajdata
+    # with the "trajdata[waymo]" option.
+    pass
+
 
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nusc" in dataset_name:
@@ -40,6 +47,9 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
     if "nuplan" in dataset_name:
         return NuplanDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
+
+    if "waymo" in dataset_name:
+        return WaymoDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 

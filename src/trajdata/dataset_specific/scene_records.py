@@ -23,6 +23,12 @@ class LyftSceneRecord(NamedTuple):
     data_idx: int
 
 
+class WaymoSceneRecord(NamedTuple):
+    name: str
+    length: str
+    data_idx: int
+
+
 class NuPlanSceneRecord(NamedTuple):
     name: str
     location: str

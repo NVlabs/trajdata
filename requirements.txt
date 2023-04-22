@@ -17,6 +17,11 @@ nuscenes-devkit==1.1.9
 protobuf==3.19.4
 l5kit==1.5.0
 
+# Waymo devkit
+tensorflow==2.11.0
+waymo-open-dataset-tf-2-11-0
+intervaltree
+
 # Development
 black
 isort

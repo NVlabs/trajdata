@@ -1,7 +1,7 @@
 # Supported Datasets and Required Formats
 
 ## nuScenes
-Nothing special needs to be done for the nuScenes dataset, simply install it as per [the instructions in the devkit README](https://github.com/nutonomy/nuscenes-devkit#nuscenes-setup).
+Nothing special needs to be done for the nuScenes dataset, simply download it as per [the instructions in the devkit README](https://github.com/nutonomy/nuscenes-devkit#nuscenes-setup).
 
 It should look like this after downloading:
 ```
@@ -54,8 +54,30 @@ It should look like this after downloading:
 
 **Note**: Not all dataset splits need to be downloaded. For example, you can download only the nuPlan Mini Split in case you only need a small sample dataset.
 
+## Waymo Open Motion Dataset
+Nothing special needs to be done for the Waymo Open Motion Dataset, simply download v1.1 as per [the instructions on the dataset website](https://waymo.com/intl/en_us/open/download/).
+
+It should look like this after downloading:
+```
+/path/to/waymo/
+            ├── training/
+            |   ├── training.tfrecord-00000-of-01000
+            |   ├── training.tfrecord-00001-of-01000
+            |   └── ...
+            ├── validation/
+            │   ├── validation.tfrecord-00000-of-00150
+            |   ├── validation.tfrecord-00001-of-00150
+            |   └── ...
+            └── testing/
+                ├── testing.tfrecord-00000-of-00150
+                ├── testing.tfrecord-00001-of-00150
+                └── ...
+```
+
+**Note**: Not all the dataset parts need to be downloaded, only the necessary directories in [the Google Cloud Bucket](https://console.cloud.google.com/storage/browser/waymo_open_dataset_motion_v_1_1_0/uncompressed/scenario) need to be downloaded (e.g., `validation` for the validation dataset).
+
 ## Lyft Level 5
-Nothing special needs to be done for the Lyft Level 5 dataset, simply install it as per [the instructions on the dataset website](https://woven-planet.github.io/l5kit/dataset.html).
+Nothing special needs to be done for the Lyft Level 5 dataset, simply download it as per [the instructions on the dataset website](https://woven-planet.github.io/l5kit/dataset.html).
 
 It should look like this after downloading:
 ```

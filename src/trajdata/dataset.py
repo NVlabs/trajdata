@@ -46,7 +46,6 @@ from trajdata.data_structures import (
     scene_collate_fn,
 )
 from trajdata.dataset_specific import RawDataset
-from trajdata.maps import VectorMap
 from trajdata.maps.map_api import MapAPI
 from trajdata.parallel import ParallelDatasetPreprocessor, scene_paths_collate_fn
 from trajdata.utils import agent_utils, env_utils, scene_utils, string_utils
@@ -187,7 +186,8 @@ class UnifiedDataset(Dataset):
         self.raster_map_params = (
             raster_map_params
             if raster_map_params is not None
-            else {"px_per_m": DEFAULT_PX_PER_M}
+            # Allowing for parallel map processing in case the user specifies num_workers.
+            else {"px_per_m": DEFAULT_PX_PER_M, "num_workers": num_workers}
         )
         self.incl_vector_map = incl_vector_map
         self.vector_map_params = (

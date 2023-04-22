@@ -162,7 +162,7 @@ def main():
     ax.imshow(map_img, alpha=0.5, origin="lower")
     vec_map.visualize_lane_graph(
         origin_lane=np.random.randint(0, len(vec_map.lanes)),
-        num_hops=10,
+        num_hops=5,
         raster_from_world=raster_from_world,
         ax=ax,
     )
