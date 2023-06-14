@@ -226,7 +226,7 @@ def plot_agent_batch(
 
     agent_name: str = batch.agent_name[batch_idx]
     agent_type: AgentType = AgentType(batch.agent_type[batch_idx].item())
-    current_state = batch.curr_agent_state[batch_idx].numpy()
+    current_state = batch.curr_agent_state[batch_idx].cpu().numpy()
     ax.set_title(
         f"{str(agent_type)}/{agent_name}\nat x={current_state[0]:.2f},y={current_state[1]:.2f},h={current_state[-1]:.2f}"
     )

@@ -1,4 +1,5 @@
 import gc
+import random
 import time
 from collections import defaultdict
 from functools import partial
@@ -704,7 +705,9 @@ class UnifiedDataset(Dataset):
         env: RawDataset,
     ) -> Union[List[Scene], List[SceneMetadata]]:
         scenes_list: Union[List[Scene], List[SceneMetadata]] = list()
-        for scene_tag in scene_tags:
+        for scene_tag in tqdm(
+            scene_tags, desc=f"Getting Scenes from {env.name}", disable=not self.verbose
+        ):
             if env.name in scene_tag:
                 scenes_list += env.get_matching_scenes(
                     scene_tag,
@@ -742,6 +745,10 @@ class UnifiedDataset(Dataset):
                 for scene_info in scenes_list
                 if self.envs_dict[scene_info.env_name].parallelizable
             ]
+
+            # Fixing the seed for random suffling (for debugging and reproducibility).
+            shuffle_rng = random.Random(123)
+            shuffle_rng.shuffle(parallel_scenes)
         else:
             serial_scenes = scenes_list
             parallel_scenes = list()

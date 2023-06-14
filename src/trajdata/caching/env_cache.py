@@ -48,6 +48,20 @@ class EnvCache:
 
         return scene_file
 
+    @staticmethod
+    def save_scene_with_path(base_path: Path, scene: Scene) -> Path:
+        scene_file: Path = EnvCache.scene_metadata_path(
+            base_path, scene.env_name, scene.name, scene.dt
+        )
+
+        scene_cache_dir: Path = scene_file.parent
+        scene_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(scene_file, "wb") as f:
+            dill.dump(scene, f)
+
+        return scene_file
+
     def load_env_scenes_list(self, env_name: str) -> List[NamedTuple]:
         env_cache_dir: Path = self.path / env_name
         with open(env_cache_dir / "scenes_list.dill", "rb") as f:

@@ -96,6 +96,56 @@ It should look like this after downloading:
 
 **Note**: Not all the dataset parts need to be downloaded, only the necessary `.zarr` files need to be downloaded (e.g., `sample.zarr` for the small sample dataset).
 
+## INTERACTION Dataset
+Nothing special needs to be done for the INTERACTION Dataset, simply download it as per [the instructions on the dataset website](http://interaction-dataset.com/).
+
+It should look like this after downloading:
+```
+/path/to/interaction_single/
+            ├── maps/
+            │   ├── DR_CHN_Merging_ZS0.osm
+            |   ├── DR_CHN_Merging_ZS0.osm_xy
+            |   └── ...
+            ├── test_conditional-single-agent/
+            │   ├── DR_CHN_Merging_ZS0_obs.csv
+            |   ├── DR_CHN_Merging_ZS2_obs.csv
+            |   └── ...
+            └── test_single-agent/
+            │   ├── DR_CHN_Merging_ZS0_obs.csv
+            |   ├── DR_CHN_Merging_ZS2_obs.csv
+            |   └── ...
+            └── train/
+            │   ├── DR_CHN_Merging_ZS0_train.csv
+            |   ├── DR_CHN_Merging_ZS2_train.csv
+            |   └── ...
+            └── val/
+                ├── DR_CHN_Merging_ZS0_val.csv
+                ├── DR_CHN_Merging_ZS2_val.csv
+                └── ...
+
+/path/to/interaction_multi/
+            ├── maps/
+            │   ├── DR_CHN_Merging_ZS0.osm
+            |   ├── DR_CHN_Merging_ZS0.osm_xy
+            |   └── ...
+            ├── test_conditional-multi-agent/
+            │   ├── DR_CHN_Merging_ZS0_obs.csv
+            |   ├── DR_CHN_Merging_ZS2_obs.csv
+            |   └── ...
+            └── test_multi-agent/
+            │   ├── DR_CHN_Merging_ZS0_obs.csv
+            |   ├── DR_CHN_Merging_ZS2_obs.csv
+            |   └── ...
+            └── train/
+            │   ├── DR_CHN_Merging_ZS0_train.csv
+            |   ├── DR_CHN_Merging_ZS2_train.csv
+            |   └── ...
+            └── val/
+                ├── DR_CHN_Merging_ZS0_val.csv
+                ├── DR_CHN_Merging_ZS2_val.csv
+                └── ...
+```
+
 ## ETH/UCY Pedestrians
 The raw data can be found in many places online, ranging from [research projects' data download scripts](https://github.com/agrimgupta92/sgan/blob/master/scripts/download_data.sh) to [copies of the original data itself](https://github.com/StanfordASL/Trajectron-plus-plus/tree/master/experiments/pedestrians/raw/raw/all_data) on GitHub. In this data loader, we assume the data was sourced from the latter.
 
@@ -111,3 +161,30 @@ It should look like this after downloading:
             ├── students003.txt
             └── uni_examples.txt
 ```
+
+## Stanford Drone Dataset
+The raw data can be found in many places online, the easiest is probably [this space-optimized version](https://www.kaggle.com/datasets/aryashah2k/stanford-drone-dataset) on Kaggle.
+
+It should look like this after downloading:
+```
+/path/to/sdd/
+            ├── bookstore/
+            |   ├── video0
+            |       ├── annotations.txt
+            |       └── reference.jpg
+            |   ├── video1
+            |       ├── annotations.txt
+            |       └── reference.jpg
+            |   └── ...
+            ├── coupa/
+            |   ├── video0
+            |       ├── annotations.txt
+            |       └── reference.jpg
+            |   ├── video1
+            |       ├── annotations.txt
+            |       └── reference.jpg
+            |   └── ...
+            └── ...
+```
+
+**Note**: Only the annotations need to be downloaded (not the videos).

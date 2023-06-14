@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Optional, Tuple, Type
 
 import numpy as np
 from torch.utils.data import Dataset
@@ -29,7 +29,10 @@ class ParallelDatasetPreprocessor(Dataset):
         self.rebuild_cache = rebuild_cache
 
         env_names: List[str] = list(envs_dir_dict.keys())
-        scene_names: List[str] = [scene_info.name for scene_info in scene_info_list]
+        scene_idxs_names: List[Tuple[int, str]] = [
+            (idx, scene_info.name) for idx, scene_info in enumerate(scene_info_list)
+        ]
+        scene_name_idxs, scene_names = zip(*scene_idxs_names)
 
         self.scene_idxs = np.array(
             [scene_info.raw_data_idx for scene_info in scene_info_list], dtype=int
@@ -38,11 +41,8 @@ class ParallelDatasetPreprocessor(Dataset):
             [env_names.index(scene_info.env_name) for scene_info in scene_info_list],
             dtype=int,
         )
-        self.scene_name_idxs = np.array(
-            [scene_names.index(scene_info.name) for scene_info in scene_info_list],
-            dtype=int,
-        )
 
+        self.scene_name_idxs = np.array(scene_name_idxs, dtype=int)
         self.env_names_arr = np.array(env_names).astype(np.string_)
         self.scene_names_arr = np.array(scene_names).astype(np.string_)
         self.data_dir_arr = np.array(list(envs_dir_dict.values())).astype(np.string_)
