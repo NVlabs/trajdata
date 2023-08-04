@@ -52,7 +52,7 @@ class TestVectorMap(unittest.TestCase):
 
 def maps_equal(map1: VectorMap, map2: VectorMap) -> bool:
     elements1_set = set([elem.id for elem in map1.iter_elems()])
-    elements2_set = set([elem.id for elem in map1.iter_elems()])
+    elements2_set = set([elem.id for elem in map2.iter_elems()])
     return elements1_set == elements2_set
 
 
