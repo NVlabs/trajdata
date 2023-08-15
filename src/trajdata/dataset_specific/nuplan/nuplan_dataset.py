@@ -323,10 +323,13 @@ class NuplanDataset(RawDataset):
 
         ### Calculating agent accelerations
         agent_ids: np.ndarray = agents_df.index.get_level_values(0).to_numpy()
-        agents_df[["ax", "ay"]] = (
-            arr_utils.agent_aware_diff(agents_df[["vx", "vy"]].to_numpy(), agent_ids)
-            / nuplan_utils.NUPLAN_DT
-        )
+        if len(agent_ids) > 0:
+            agents_df[["ax", "ay"]] = (
+                arr_utils.agent_aware_diff(agents_df[["vx", "vy"]].to_numpy(), agent_ids)
+                / nuplan_utils.NUPLAN_DT
+            )
+        else:
+            agents_df[["ax", "ay"]] = agents_df[["vx", "vy"]]
 
         # for agent_id, frames in agents_df.groupby("agent_id")["scene_ts"]:
         #     if frames.shape[0] <= 1:
