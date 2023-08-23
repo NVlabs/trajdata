@@ -275,3 +275,7 @@ class TestSceneSampler(unittest.TestCase):
 
             if scene_idx == 10:
                 break
+
+
+if __name__ == "__main__":
+    unittest.main()

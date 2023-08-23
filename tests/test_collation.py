@@ -222,3 +222,7 @@ class TestCollation(unittest.TestCase):
 
             if i == 5:
                 break
+
+
+if __name__ == "__main__":
+    unittest.main()

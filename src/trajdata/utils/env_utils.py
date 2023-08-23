@@ -1,9 +1,15 @@
 from typing import Dict, List
 
 from trajdata.dataset_specific.eth_ucy_peds import EUPedsDataset
-from trajdata.dataset_specific.interaction import InteractionDataset
 from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.sdd_peds import SDDPedsDataset
+
+try:
+    from trajdata.dataset_specific.interaction import InteractionDataset
+except ModuleNotFoundError:
+    # This can happen if the user did not install trajdata
+    # with the "trajdata[interaction]" option.
+    pass
 
 try:
     from trajdata.dataset_specific.lyft import LyftDataset
