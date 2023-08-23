@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 import torch
+
 from trajdata.data_structures.state import NP_STATE_TYPES, TORCH_STATE_TYPES
 
 AgentStateArray = NP_STATE_TYPES["x,y,z,xd,yd,xdd,ydd,h"]

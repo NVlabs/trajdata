@@ -183,6 +183,7 @@ class UnifiedDataset(Dataset):
         self.future_sec = future_sec
         self.agent_interaction_distances = agent_interaction_distances
         self.incl_robot_future = incl_robot_future
+
         self.incl_raster_map = incl_raster_map
         self.raster_map_params = (
             raster_map_params
@@ -190,6 +191,7 @@ class UnifiedDataset(Dataset):
             # Allowing for parallel map processing in case the user specifies num_workers.
             else {"px_per_m": DEFAULT_PX_PER_M, "num_workers": num_workers}
         )
+
         self.incl_vector_map = incl_vector_map
         self.vector_map_params = (
             vector_map_params
@@ -204,6 +206,9 @@ class UnifiedDataset(Dataset):
                 "collate": False,
             }
         )
+        if self.desired_dt is not None:
+            self.vector_map_params["desired_dt"] = desired_dt
+
         self.only_types = None if only_types is None else set(only_types)
         self.only_predict = None if only_predict is None else set(only_predict)
         self.no_types = None if no_types is None else set(no_types)
@@ -313,9 +318,14 @@ class UnifiedDataset(Dataset):
                         matching_datasets, scene_description_contains, env
                     )
 
-                if self.incl_vector_map:
+                if self.incl_vector_map and env.metadata.map_locations is not None:
+                    # env.metadata.map_locations can be none for map-containing
+                    # datasets if they have a huge number of maps
+                    # (or map crops, like Waymo).
                     for map_name in env.metadata.map_locations:
-                        self._map_api.get_map(f"{env.name}:{map_name}")
+                        self._map_api.get_map(
+                            f"{env.name}:{map_name}", **self.vector_map_params
+                        )
 
                 all_scenes_list += scenes_list
 

@@ -174,7 +174,7 @@ class NuPlanObject:
     ) -> pd.DataFrame:
         query = f"""
         SELECT  tls.lidar_pc_token AS lidar_pc_token,
-                tls.lane_connector_id AS lane_connector_id,
+                tls.lane_connector_id AS lane_id,
                 tls.status AS raw_status
         FROM traffic_light_status AS tls 
         WHERE lidar_pc_token IN ({('?,'*len(binary_lpc_tokens))[:-1]});

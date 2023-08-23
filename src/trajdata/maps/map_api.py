@@ -38,7 +38,9 @@ class MapAPI:
 
         if scene_cache is not None:
             self.maps[map_id].associate_scene_data(
-                scene_cache.get_traffic_light_status_dict()
+                scene_cache.get_traffic_light_status_dict(
+                    kwargs.get("desired_dt", None)
+                )
             )
 
         return self.maps[map_id]

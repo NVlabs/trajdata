@@ -13,7 +13,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 name = "trajdata"
-version = "1.3.2"
+version = "1.3.3"
 authors = [{ name = "Boris Ivanovic", email = "bivanovic@nvidia.com" }]
 description = "A unified interface to many trajectory forecasting datasets."
 readme = "README.md"

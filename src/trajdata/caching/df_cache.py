@@ -632,7 +632,7 @@ class DataFrameCache(SceneCache):
     ) -> None:
         """
         Assumes traffic_light_status_data is a MultiIndex dataframe with
-        lane_connector_id and scene_ts as the indices, and has a column "status" with integer
+        lane_id and scene_ts as the indices, and has a column "status" with integer
         values for traffic status given by the TrafficLightStatus enum
         """
         scene_cache_dir: Path = DataFrameCache.scene_cache_dir(
@@ -669,7 +669,7 @@ class DataFrameCache(SceneCache):
                 self.scene_dir
                 / DataFrameCache._tls_data_file(self.scene.env_metadata.dt),
                 use_threads=False,
-            ).set_index(["lane_connector_id", "scene_ts"])
+            ).set_index(["lane_id", "scene_ts"])
 
             # Interpolate it to the desired dt.
             tls_data_df = df_utils.interpolate_multi_index_df(
@@ -685,7 +685,7 @@ class DataFrameCache(SceneCache):
             tls_data_df: pd.DataFrame = pd.read_feather(
                 tls_data_path,
                 use_threads=False,
-            ).set_index(["lane_connector_id", "scene_ts"])
+            ).set_index(["lane_id", "scene_ts"])
 
         # Return data as dict
         return {

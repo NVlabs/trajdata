@@ -11,6 +11,7 @@ except ModuleNotFoundError:
     # with the "trajdata[interaction]" option.
     pass
 
+
 try:
     from trajdata.dataset_specific.lyft import LyftDataset
 except ModuleNotFoundError:
