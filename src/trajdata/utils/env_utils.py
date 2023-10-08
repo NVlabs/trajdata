@@ -41,6 +41,13 @@ except ModuleNotFoundError:
     # with the "trajdata[waymo]" option.
     pass
 
+try:
+    from trajdata.dataset_specific.yandex_shifts import YandexShiftsDataset
+except ModuleNotFoundError:
+    # This can happen if the user did not install trajdata
+    # with the "trajdata[ysdc]" option.
+    pass
+
 
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nusc" in dataset_name:
@@ -64,6 +71,10 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
     if "waymo" in dataset_name:
         return WaymoDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
+
+    if "ysdc" in dataset_name:
+        return YandexShiftsDataset(
+            dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     if "interaction" in dataset_name:
         return InteractionDataset(

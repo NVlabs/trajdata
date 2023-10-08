@@ -76,6 +76,32 @@ It should look like this after downloading:
 
 **Note**: Not all the dataset parts need to be downloaded, only the necessary directories in [the Google Cloud Bucket](https://console.cloud.google.com/storage/browser/waymo_open_dataset_motion_v_1_1_0/uncompressed/scenario) need to be downloaded (e.g., `validation` for the validation dataset).
 
+## Yandex Shifts Motion Prediction Dataset
+Nothing special needs to be done for the Yandex Shifts Motion Prediction Dataset, simply download as per [the instructions on the dataset website](https://github.com/Shifts-Project/shifts#motion-prediction-1).
+
+It should look like this after downloading:
+```
+/path/to/ysdc/
+            ├── train/
+            |   ├── 000
+            |   |   ├── 000000.pb
+            |   |   └── ...
+            |   └── ...
+            ├── development/
+            |   ├── 000
+            |   |   ├── 000000.pb
+            |   |   └── ...
+            |   └── ...
+            └── eval/
+                ├── 000
+                |   ├── 000000.pb
+                |   └── ...
+                └── ...
+```
+
+**Note**: Yuo may also download a complete unpartitioned dataset. The dataset also contains prerendered examples,
+which are not required for `trajdata` functioning.
+
 ## Lyft Level 5
 Nothing special needs to be done for the Lyft Level 5 dataset, simply download it as per [the instructions on the dataset website](https://woven-planet.github.io/l5kit/dataset.html).
 
