@@ -59,4 +59,3 @@ class YandexShiftsSceneRecord(NamedTuple):
     track: str
     sun_phase: str
     precipitation: str
-

@@ -74,7 +74,8 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
     if "ysdc" in dataset_name:
         return YandexShiftsDataset(
-            dataset_name, data_dir, parallelizable=True, has_maps=True)
+            dataset_name, data_dir, parallelizable=True, has_maps=True
+        )
 
     if "interaction" in dataset_name:
         return InteractionDataset(

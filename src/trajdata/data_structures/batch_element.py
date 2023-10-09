@@ -508,7 +508,6 @@ class SceneBatchElement:
         future_sec: Tuple[Optional[float], Optional[float]],
         nearby_agents: List[AgentMetadata],
     ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
-
         (
             agent_futures,
             agent_future_extents,
