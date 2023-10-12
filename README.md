@@ -1,10 +1,14 @@
-# Unified Trajectory Data Loader
+# trajdata: A Unified Interface to Multiple Human Trajectory Datasets
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![DOI](https://zenodo.org/badge/488789438.svg)](https://zenodo.org/badge/latestdoi/488789438)
 [![PyPI version](https://badge.fury.io/py/trajdata.svg)](https://badge.fury.io/py/trajdata)
+
+### Announcements
+
+**Sept 2023**: [Our paper about trajdata](https://arxiv.org/abs/2307.13924) has been accepted to the NeurIPS 2023 Datasets and Benchmarks Track!
 
 ## Installation
 
@@ -207,6 +211,20 @@ for t in range(1, sim_scene.scene.length_timesteps):
 
 `examples/sim_example.py` contains a more comprehensive example which initializes a simulation from a scene in the nuScenes mini dataset, steps through it by replaying agents' GT motions, and computes metrics based on scene statistics (e.g., displacement error from the original GT data, velocity/acceleration/jerk histograms).
 
+## Citation
+
+If you use this software, please cite it as follows:
+```
+@Inproceedings{ivanovic2023trajdata,
+  author = {Ivanovic, Boris and Song, Guanyu and Gilitschenski, Igor and Pavone, Marco},
+  title = {{trajdata}: A Unified Interface to Multiple Human Trajectory Datasets},
+  booktitle = {{Proceedings of the Neural Information Processing Systems (NeurIPS) Track on Datasets and Benchmarks}},
+  month = dec,
+  year = {2023},
+  address = {New Orleans, USA},
+  url = {https://arxiv.org/abs/2307.13924}
+}
+```
+
 ## TODO
 - Create a method like finalize() which writes all the batch information to a TFRecord/WebDataset/some other format which is (very) fast to read from for higher epoch training.
-- Add more examples to the README.
