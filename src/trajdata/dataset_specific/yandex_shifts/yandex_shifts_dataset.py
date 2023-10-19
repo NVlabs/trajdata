@@ -117,7 +117,7 @@ class YandexShiftsDataset(RawDataset):
                     self.metadata,
                     scene_record.name,
                     scene_record.data_idx,
-                    scene_record.scene_split,
+                    scene_split,
                     scene_record.length,
                     scene_record.data_idx,
                     None,  # This isn't used if everything is already cached.
