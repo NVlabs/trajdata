@@ -300,6 +300,7 @@ def extract_agent_data_from_ysdc_scene(
         scene_agents_data_df.groupby("agent_id", group_keys=True)
         .apply(lambda group: group.interpolate(limit_area="inside"))
         .reset_index(drop=True)
+        .set_index(["agent_id", "scene_ts"])
     )
     for agent_id in agent_id_to_type.keys():
         agent_list.append(
