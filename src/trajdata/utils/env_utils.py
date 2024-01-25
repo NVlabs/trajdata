@@ -1,71 +1,46 @@
 from typing import Dict, List
 
-from trajdata.dataset_specific.eth_ucy_peds import EUPedsDataset
-from trajdata.dataset_specific.raw_dataset import RawDataset
-from trajdata.dataset_specific.sdd_peds import SDDPedsDataset
-
-try:
-    from trajdata.dataset_specific.interaction import InteractionDataset
-except ModuleNotFoundError:
-    # This can happen if the user did not install trajdata
-    # with the "trajdata[interaction]" option.
-    pass
-
-
-try:
-    from trajdata.dataset_specific.lyft import LyftDataset
-except ModuleNotFoundError:
-    # This can happen if the user did not install trajdata
-    # with the "trajdata[lyft]" option.
-    pass
-
-try:
-    from trajdata.dataset_specific.nusc import NuscDataset
-except ModuleNotFoundError:
-    # This can happen if the user did not install trajdata
-    # with the "trajdata[nusc]" option.
-    pass
-
-
-try:
-    from trajdata.dataset_specific.nuplan import NuplanDataset
-except ModuleNotFoundError:
-    # This can happen if the user did not install trajdata
-    # with the "trajdata[nuplan]" option.
-    pass
-
-try:
-    from trajdata.dataset_specific.waymo import WaymoDataset
-except ModuleNotFoundError:
-    # This can happen if the user did not install trajdata
-    # with the "trajdata[waymo]" option.
-    pass
+from trajdata.dataset_specific import RawDataset
 
 
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nusc" in dataset_name:
+        from trajdata.dataset_specific.nusc import NuscDataset
+
         return NuscDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
 
     if "lyft" in dataset_name:
+        from trajdata.dataset_specific.lyft import LyftDataset
+
         return LyftDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     if "eupeds" in dataset_name:
+        from trajdata.dataset_specific.eth_ucy_peds import EUPedsDataset
+
         return EUPedsDataset(
             dataset_name, data_dir, parallelizable=True, has_maps=False
         )
 
     if "sdd" in dataset_name:
+        from trajdata.dataset_specific.sdd_peds import SDDPedsDataset
+
         return SDDPedsDataset(
             dataset_name, data_dir, parallelizable=True, has_maps=False
         )
 
     if "nuplan" in dataset_name:
+        from trajdata.dataset_specific.nuplan import NuplanDataset
+
         return NuplanDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     if "waymo" in dataset_name:
+        from trajdata.dataset_specific.waymo import WaymoDataset
+
         return WaymoDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     if "interaction" in dataset_name:
+        from trajdata.dataset_specific.interaction import InteractionDataset
+
         return InteractionDataset(
             dataset_name, data_dir, parallelizable=True, has_maps=True
         )

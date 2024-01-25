@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
         VectorMap,
     )
     from trajdata.maps.map_kdtree import MapElementKDTree
+    from trajdata.maps.map_strtree import MapElementSTRTree
 
 import pickle
 from math import ceil, floor
@@ -654,7 +656,7 @@ class DataFrameCache(SceneCache):
 
     def get_traffic_light_status_dict(
         self, desired_dt: Optional[float] = None
-    ) -> Dict[Tuple[int, int], TrafficLightStatus]:
+    ) -> Dict[Tuple[str, int], TrafficLightStatus]:
         """
         Returns dict mapping Lane Id, scene_ts to traffic light status for the
         particular scene. If data doesn't exist for the current dt, interpolates and
@@ -704,11 +706,12 @@ class DataFrameCache(SceneCache):
     @staticmethod
     def get_map_paths(
         cache_path: Path, env_name: str, map_name: str, resolution: float
-    ) -> Tuple[Path, Path, Path, Path, Path]:
+    ) -> Tuple[Path, Path, Path, Path, Path, Path]:
         maps_path: Path = DataFrameCache.get_maps_path(cache_path, env_name)
 
         vector_map_path: Path = maps_path / f"{map_name}.pb"
         kdtrees_path: Path = maps_path / f"{map_name}_kdtrees.dill"
+        rtrees_path: Path = maps_path / f"{map_name}_rtrees.dill"
         raster_map_path: Path = maps_path / f"{map_name}_{resolution:.2f}px_m.zarr"
         raster_metadata_path: Path = maps_path / f"{map_name}_{resolution:.2f}px_m.dill"
 
@@ -716,6 +719,7 @@ class DataFrameCache(SceneCache):
             maps_path,
             vector_map_path,
             kdtrees_path,
+            rtrees_path,
             raster_map_path,
             raster_metadata_path,
         )
@@ -728,13 +732,19 @@ class DataFrameCache(SceneCache):
             maps_path,
             vector_map_path,
             kdtrees_path,
+            rtrees_path,
             raster_map_path,
             raster_metadata_path,
         ) = DataFrameCache.get_map_paths(cache_path, env_name, map_name, resolution)
+
+        # TODO(bivanovic): For now, rtrees are optional to have in the cache.
+        # In the future, they may be required (likely after we develop an
+        # incremental caching scheme or similar to handle additions like these).
         return (
             maps_path.exists()
             and vector_map_path.exists()
             and kdtrees_path.exists()
+            # and rtrees_path.exists()
             and raster_metadata_path.exists()
             and raster_map_path.exists()
         )
@@ -751,6 +761,7 @@ class DataFrameCache(SceneCache):
             maps_path,
             vector_map_path,
             kdtrees_path,
+            rtrees_path,
             raster_map_path,
             raster_metadata_path,
         ) = DataFrameCache.get_map_paths(
@@ -774,6 +785,10 @@ class DataFrameCache(SceneCache):
         # Saving precomputed map element kdtrees.
         with open(kdtrees_path, "wb") as f:
             dill.dump(vector_map.search_kdtrees, f)
+
+        # Saving precomputed map element rtrees.
+        with open(rtrees_path, "wb") as f:
+            dill.dump(vector_map.search_rtrees, f)
 
         # Saving the rasterized map data.
         zarr.save(raster_map_path, rasterized_map.data)
@@ -814,7 +829,7 @@ class DataFrameCache(SceneCache):
         return np.pad(patch, [(0, 0), (pad_top, pad_bot), (pad_left, pad_right)])
 
     def load_kdtrees(self) -> Dict[str, MapElementKDTree]:
-        _, _, kdtrees_path, _, _ = DataFrameCache.get_map_paths(
+        _, _, kdtrees_path, _, _, _ = DataFrameCache.get_map_paths(
             self.path, self.scene.env_name, self.scene.location, 0.0
         )
 
@@ -840,6 +855,47 @@ class DataFrameCache(SceneCache):
         else:
             return self._kdtrees
 
+    def load_rtrees(self) -> MapElementSTRTree:
+        _, _, _, rtrees_path, _, _ = DataFrameCache.get_map_paths(
+            self.path, self.scene.env_name, self.scene.location, 0.0
+        )
+
+        if not rtrees_path.exists():
+            warnings.warn(
+                (
+                    "Trying to load cached RTree encoding 2D Map elements, "
+                    f"but {rtrees_path} does not exist. Earlier versions of "
+                    "trajdata did not build and cache this RTree. If area queries "
+                    "are needed, please rebuild the map cache (see "
+                    "examples/preprocess_maps.py for an example of how to do this). "
+                    "Otherwise, please ignore this warning."
+                ),
+                UserWarning,
+            )
+            return None
+
+        with open(rtrees_path, "rb") as f:
+            rtrees: MapElementSTRTree = dill.load(f)
+
+        return rtrees
+
+    def get_rtrees(self, load_only_once: bool = True):
+        """Loads and returns the rtrees object from the cache file.
+
+        Args:
+            load_only_once (bool): store the kdtree dictionary in self so that we
+                dont have to load it from the cache file more than once.
+        """
+        if self._rtrees is None:
+            rtrees = self.load_rtrees()
+            if load_only_once:
+                self._rtrees = rtrees
+
+            return rtrees
+
+        else:
+            return self._rtrees
+
     def load_map_patch(
         self,
         world_x: float,
@@ -854,6 +910,7 @@ class DataFrameCache(SceneCache):
     ) -> Tuple[np.ndarray, np.ndarray, bool]:
         (
             maps_path,
+            _,
             _,
             _,
             raster_map_path,

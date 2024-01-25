@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from trajdata import MapAPI, VectorMap
+from trajdata.maps.vec_map_elements import MapElementType
+from trajdata.utils import map_utils
 
 
 def main():
@@ -23,12 +25,16 @@ def main():
     }
 
     start = time.perf_counter()
-    vec_map: VectorMap = map_api.get_map(f"{env_name}:{random_location_dict[env_name]}")
+    vec_map: VectorMap = map_api.get_map(
+        f"{env_name}:{random_location_dict[env_name]}", incl_road_areas=True
+    )
     end = time.perf_counter()
     print(f"Map loading took {(end - start)*1000:.2f} ms")
 
     start = time.perf_counter()
-    vec_map: VectorMap = map_api.get_map(f"{env_name}:{random_location_dict[env_name]}")
+    vec_map: VectorMap = map_api.get_map(
+        f"{env_name}:{random_location_dict[env_name]}", incl_road_areas=True
+    )
     end = time.perf_counter()
     print(f"Repeated (cached in memory) map loading took {(end - start)*1000:.2f} ms")
 
@@ -63,6 +69,35 @@ def main():
     )
     end = time.perf_counter()
     print(f"Lane visualization took {(end - start)*1000:.2f} ms")
+
+    point = vec_map.lanes[lane_idx].center.xyz[0, :]
+    point_raster = map_utils.transform_points(
+        point[None, :], transf_mat=raster_from_world
+    )
+    ax.scatter(point_raster[:, 0], point_raster[:, 1])
+
+    print("Getting nearest road area...")
+    start = time.perf_counter()
+    area = vec_map.get_closest_area(point, elem_type=MapElementType.ROAD_AREA)
+    end = time.perf_counter()
+    print(f"Getting nearest area took {(end-start)*1000:.2f} ms")
+
+    raster_pts = map_utils.transform_points(area.exterior_polygon.xy, raster_from_world)
+    ax.fill(raster_pts[:, 0], raster_pts[:, 1], alpha=1.0, color="C0")
+
+    print("Getting road areas within 100m...")
+    start = time.perf_counter()
+    areas = vec_map.get_areas_within(
+        point, elem_type=MapElementType.ROAD_AREA, dist=100.0
+    )
+    end = time.perf_counter()
+    print(f"Getting areas within took {(end-start)*1000:.2f} ms")
+
+    for area in areas:
+        raster_pts = map_utils.transform_points(
+            area.exterior_polygon.xy, raster_from_world
+        )
+        ax.fill(raster_pts[:, 0], raster_pts[:, 1], alpha=0.2, color="C1")
 
     ax.axis("equal")
     ax.grid(None)

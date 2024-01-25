@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Final
 
 if TYPE_CHECKING:
     from trajdata.maps import VectorMap
@@ -19,8 +19,9 @@ from trajdata.utils import map_utils
 
 # Sub-pixel drawing precision constants.
 # See https://github.com/woven-planet/l5kit/blob/master/l5kit/l5kit/rasterization/semantic_rasterizer.py#L16
-CV2_SUB_VALUES = {"shift": 9, "lineType": cv2.LINE_AA}
-CV2_SHIFT_VALUE = 2 ** CV2_SUB_VALUES["shift"]
+CV2_SUB_VALUES: Final[Dict[str, Any]] = {"shift": 9, "lineType": cv2.LINE_AA}
+CV2_SHIFT_VALUE: Final[int] = 2 ** CV2_SUB_VALUES["shift"]
+DEFAULT_PX_PER_M: Final[float] = 2.0
 
 
 def cv2_subpixel(coords: np.ndarray) -> np.ndarray:

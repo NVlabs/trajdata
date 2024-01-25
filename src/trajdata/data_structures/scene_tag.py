@@ -1,3 +1,4 @@
+import re
 from typing import Set, Tuple
 
 
@@ -7,6 +8,9 @@ class SceneTag:
 
     def contains(self, query: Set[str]) -> bool:
         return query.issubset(self._tag_tuple)
+
+    def matches_any(self, regex: re.Pattern) -> bool:
+        return any(regex.search(x) is not None for x in self._tag_tuple)
 
     def __contains__(self, item) -> bool:
         return item in self._tag_tuple

@@ -22,8 +22,12 @@ class TestDescriptionMatching(unittest.TestCase):
 
     def test_intersection_more_initial(self):
         dataset = UnifiedDataset(
-            desired_data=["nusc_mini", "lyft_sample"],
+            desired_data=["nusc_mini", "nuplan_mini"],
             scene_description_contains=["intersection"],
+            data_dirs={  # Remember to change this to match your filesystem!
+                "nusc_mini": "~/datasets/nuScenes",
+                "nuplan_mini": "~/datasets/nuplan/dataset/nuplan-v1.1",
+            },
         )
 
         for scene_info in dataset.scenes():

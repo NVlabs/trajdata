@@ -181,6 +181,7 @@ class NuPlanObject:
         """
         df = pd.read_sql_query(query, self.connection, params=binary_lpc_tokens)
         df["status"] = df["raw_status"].map(NUPLAN_TRAFFIC_STATUS_DICT)
+        df["lane_id"] = df["lane_id"].astype(str)
         return df.drop(columns=["raw_status"])
 
     def close_db(self) -> None:

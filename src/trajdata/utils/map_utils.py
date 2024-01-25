@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from trajdata.maps import map_kdtree, vec_map
+    from trajdata.maps import map_kdtree, vec_map, map_strtree
+    from trajdata.maps.vec_map_elements import MapElementType
 
 from pathlib import Path
 from typing import Dict, Final, Optional
@@ -276,11 +278,36 @@ def load_vector_map(vector_map_path: Path) -> map_proto.VectorizedMap:
     return vec_map
 
 
-def load_kdtrees(kdtrees_path: Path) -> Dict[str, map_kdtree.MapElementKDTree]:
+def load_kdtrees(
+    kdtrees_path: Path,
+) -> Dict[MapElementType, map_kdtree.MapElementKDTree]:
     if not kdtrees_path.exists():
         raise ValueError(f"{kdtrees_path} does not exist!")
 
     with open(kdtrees_path, "rb") as f:
-        kdtrees: Dict[str, map_kdtree.MapElementKDTree] = dill.load(f)
+        kdtrees: Dict[MapElementType, map_kdtree.MapElementKDTree] = dill.load(f)
 
     return kdtrees
+
+
+def load_rtrees(
+    rtrees_path: Path,
+) -> Optional[Dict[MapElementType, map_strtree.MapElementSTRTree]]:
+    if not rtrees_path.exists():
+        warnings.warn(
+            (
+                "Trying to load cached RTree encoding 2D Map elements, "
+                f"but {rtrees_path} does not exist. Earlier versions of "
+                "trajdata did not build and cache this RTree. If area queries "
+                "are needed, please rebuild the map cache (see "
+                "examples/preprocess_maps.py for an example of how to do this). "
+                "Otherwise, please ignore this warning."
+            ),
+            UserWarning,
+        )
+        return None
+
+    with open(rtrees_path, "rb") as f:
+        rtrees: Dict[MapElementType, map_strtree.MapElementSTRTree] = dill.load(f)
+
+    return rtrees

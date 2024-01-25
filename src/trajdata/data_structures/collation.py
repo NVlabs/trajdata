@@ -182,7 +182,6 @@ def raster_map_collate_fn_scene(
     max_agent_num: Optional[int] = None,
     pad_value: Any = np.nan,
 ) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
-
     if batch_elems[0].map_patches is None:
         return None, None, None, None
 

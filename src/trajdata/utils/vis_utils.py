@@ -481,7 +481,7 @@ def draw_map_elems(
     vec_map: VectorMap,
     map_from_world_tf: np.ndarray,
     bbox: Optional[Tuple[float, float, float, float]] = None,
-    **kwargs
+    **kwargs,
 ) -> Tuple[GlyphRenderer, GlyphRenderer, GlyphRenderer, GlyphRenderer, GlyphRenderer]:
     """_summary_
 

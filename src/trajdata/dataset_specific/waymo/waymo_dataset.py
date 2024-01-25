@@ -173,7 +173,8 @@ class WaymoDataset(RawDataset):
         ]
 
         dataset = tf.data.TFRecordDataset(
-            [self.dataset_obj.get_filename(scene.raw_data_idx)], compression_type=""
+            [str(self.dataset_obj.get_filename(scene.raw_data_idx))],
+            compression_type="",
         )
         scenario: Scenario = Scenario()
         for data in dataset:
@@ -334,7 +335,7 @@ class WaymoDataset(RawDataset):
         map_params: Dict[str, Any],
     ):
         dataset = tf.data.TFRecordDataset(
-            [self.dataset_obj.get_filename(data_idx)], compression_type=""
+            [str(self.dataset_obj.get_filename(data_idx))], compression_type=""
         )
 
         scenario: Scenario = Scenario()

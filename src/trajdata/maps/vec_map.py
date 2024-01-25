@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from trajdata.maps.map_kdtree import MapElementKDTree, LaneCenterKDTree
+    from trajdata.maps.map_strtree import MapElementSTRTree
 
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ from tqdm import tqdm
 
 import trajdata.proto.vectorized_map_pb2 as map_proto
 from trajdata.maps.map_kdtree import LaneCenterKDTree
+from trajdata.maps.map_strtree import MapElementSTRTree
 from trajdata.maps.traffic_light_status import TrafficLightStatus
 from trajdata.maps.vec_map_elements import (
     MapElement,
@@ -51,7 +53,8 @@ class VectorMap:
         default_factory=lambda: defaultdict(dict)
     )
     search_kdtrees: Optional[Dict[MapElementType, MapElementKDTree]] = None
-    traffic_light_status: Optional[Dict[Tuple[int, int], TrafficLightStatus]] = None
+    search_rtrees: Optional[Dict[MapElementType, MapElementSTRTree]] = None
+    traffic_light_status: Optional[Dict[Tuple[str, int], TrafficLightStatus]] = None
 
     def __post_init__(self) -> None:
         self.env_name, self.map_name = self.map_id.split(":")
@@ -64,7 +67,16 @@ class VectorMap:
         self.elements[map_elem.elem_type][map_elem.id] = map_elem
 
     def compute_search_indices(self) -> None:
+        # TODO(bivanovic@nvidia.com): merge tree dicts?
         self.search_kdtrees = {MapElementType.ROAD_LANE: LaneCenterKDTree(self)}
+        self.search_rtrees = {
+            elem_type: MapElementSTRTree(self, elem_type)
+            for elem_type in [
+                MapElementType.ROAD_AREA,
+                MapElementType.PED_CROSSWALK,
+                MapElementType.PED_WALKWAY,
+            ]
+        }
 
     def iter_elems(self) -> Iterator[MapElement]:
         for elems_dict in self.elements.values():
@@ -324,11 +336,12 @@ class VectorMap:
             ),
             elements=map_elem_dict,
             search_kdtrees=None,
+            search_rtrees=None,
             traffic_light_status=None,
         )
 
     def associate_scene_data(
-        self, traffic_light_status_dict: Dict[Tuple[int, int], TrafficLightStatus]
+        self, traffic_light_status_dict: Dict[Tuple[str, int], TrafficLightStatus]
     ) -> None:
         """Associates vector map with scene-specific data like traffic light information"""
         self.traffic_light_status = traffic_light_status_dict
@@ -346,6 +359,9 @@ class VectorMap:
         Returns:
             List[RoadLane]: List of possible road lanes that agent could be on
         """
+        assert (
+            self.search_kdtrees is not None
+        ), "Search KDTree not found, please rebuild cache."
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return [
             self.lanes[idx]
@@ -353,10 +369,16 @@ class VectorMap:
         ]
 
     def get_closest_lane(self, xyz: np.ndarray) -> RoadLane:
+        assert (
+            self.search_kdtrees is not None
+        ), "Search KDTree not found, please rebuild cache."
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return self.lanes[lane_kdtree.closest_polyline_ind(xyz)]
 
     def get_closest_unique_lanes(self, xyz_vec: np.ndarray) -> List[RoadLane]:
+        assert (
+            self.search_kdtrees is not None
+        ), "Search KDTree not found, please rebuild cache."
         assert xyz_vec.ndim == 2  # xyz_vec is assumed to be (*, 3)
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         closest_inds = lane_kdtree.closest_polyline_ind(xyz_vec)
@@ -364,17 +386,61 @@ class VectorMap:
         return [self.lanes[ind] for ind in unique_inds]
 
     def get_lanes_within(self, xyz: np.ndarray, dist: float) -> List[RoadLane]:
+        assert (
+            self.search_kdtrees is not None
+        ), "Search KDTree not found, please rebuild cache."
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return [
             self.lanes[idx] for idx in lane_kdtree.polyline_inds_in_range(xyz, dist)
         ]
+
+    def get_closest_area(
+        self, xy: np.ndarray, elem_type: MapElementType
+    ) -> Union[RoadArea, PedCrosswalk, PedWalkway]:
+        """
+        Returns 2D MapElement closest to query point
+
+        Args:
+            xy (np.ndarray): query point
+            elem_type (MapElementType): type of map element desired
+
+        Returns:
+            Union[RoadArea, PedCrosswalk, PedWalkway]: closest map elem of desired type to xy point
+        """
+        assert (
+            self.search_rtrees is not None
+        ), "Search RTree not found, please rebuild cache."
+        elem_id = self.search_rtrees[elem_type].nearest_area(xy)
+        return self.elements[elem_type][elem_id]
+
+    def get_areas_within(
+        self, xy: np.ndarray, elem_type: MapElementType, dist: float
+    ) -> List[Union[RoadArea, PedCrosswalk, PedWalkway]]:
+        """
+        Returns all 2D MapElements within dist of query xy point
+
+        Args:
+            xy (np.ndarray): query point
+            elem_type (MapElementType): type of map element desired
+            dist (float): distance threshold
+
+        Returns:
+            List[Union[RoadArea, PedCrosswalk, PedWalkway]]: List of areas matching query
+        """
+        assert (
+            self.search_rtrees is not None
+        ), "Search RTree not found, please rebuild cache."
+        ids = self.search_rtrees[elem_type].query_point(
+            xy, predicate="dwithin", distance=dist
+        )
+        return [self.elements[elem_type][id] for id in ids]
 
     def get_traffic_light_status(
         self, lane_id: str, scene_ts: int
     ) -> TrafficLightStatus:
         return (
             self.traffic_light_status.get(
-                (int(lane_id), scene_ts), TrafficLightStatus.NO_DATA
+                (lane_id, scene_ts), TrafficLightStatus.NO_DATA
             )
             if self.traffic_light_status is not None
             else TrafficLightStatus.NO_DATA

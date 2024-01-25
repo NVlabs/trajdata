@@ -4,6 +4,7 @@ from trajdata import UnifiedDataset
 # @profile
 def main():
     dataset = UnifiedDataset(
+        # TODO(bivanovic@nvidia.com) Remove lyft from default examples
         desired_data=["nusc_mini", "lyft_sample", "nuplan_mini"],
         rebuild_maps=True,
         data_dirs={  # Remember to change this to match your filesystem!

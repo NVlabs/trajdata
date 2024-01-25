@@ -1,4 +1,5 @@
-from typing import Optional
+from typing import List, Optional, Tuple
+from warnings import warn
 
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
@@ -13,6 +14,7 @@ from trajdata.data_structures.agent import AgentType
 from trajdata.data_structures.batch import AgentBatch, SceneBatch
 from trajdata.data_structures.state import StateTensor
 from trajdata.maps import RasterizedMap
+from trajdata.maps.vec_map_elements import RoadLane
 
 
 def draw_agent(
@@ -124,6 +126,26 @@ def draw_map(
     ymax = np.max(world_frame_corners[:, 1, 0])
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
+
+
+def draw_lanes(
+    ax: Axes,
+    lanes: List[RoadLane],
+    centered_agent_from_world_tf: Tensor,
+    color: Tuple[float, float, float] = (0.5, 0.5, 0.5),
+):
+    transform = (
+        mtransforms.Affine2D(matrix=centered_agent_from_world_tf.cpu().numpy())
+        + ax.transData
+    )
+    for lane in lanes:
+        ax.plot(
+            lane.center.xy[:, 0],
+            lane.center.xy[:, 1],
+            linestyle="--",
+            color=color,
+            transform=transform,
+        )
 
 
 def plot_agent_batch_all(
@@ -369,9 +391,11 @@ def plot_scene_batch(
     batch: SceneBatch,
     batch_idx: int,
     ax: Optional[Axes] = None,
+    plot_vec_map: bool = False,
+    vec_map_search_radius: float = 100,
     show: bool = True,
     close: bool = True,
-) -> None:
+) -> Axes:
     if ax is None:
         _, ax = plt.subplots()
 
@@ -379,7 +403,21 @@ def plot_scene_batch(
 
     agent_from_world_tf: Tensor = batch.centered_agent_from_world_tf[batch_idx].cpu()
 
-    if batch.maps is not None:
+    if plot_vec_map and batch.vector_maps is not None:
+        try:
+            search_point = (
+                batch.centered_agent_state.position3d[batch_idx].cpu().numpy()
+            )
+        except ValueError:
+            warn(
+                "could not compute 3d position. try adding 'z' component to state format, "
+                "e.g. state_format='x,y,z,xd,yd,xdd,ydd,h'"
+            )
+            raise
+        vec_map = batch.vector_maps[batch_idx]
+        lanes = vec_map.get_lanes_within(search_point, vec_map_search_radius)
+        draw_lanes(ax, lanes, agent_from_world_tf)
+    elif batch.maps is not None:
         centered_agent_id = 0
         world_from_raster_tf: Tensor = torch.linalg.inv(
             batch.rasters_from_world_tf[batch_idx, centered_agent_id].cpu()
@@ -456,3 +494,5 @@ def plot_scene_batch(
 
     if close:
         plt.close()
+
+    return ax

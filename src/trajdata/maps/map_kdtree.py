@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict
 
 if TYPE_CHECKING:
     from trajdata.maps.vec_map import VectorMap
@@ -43,7 +43,7 @@ class MapElementKDTree:
             total=len(vector_map),
             disable=not verbose,
         ):
-            result = self._extract_points(map_elem)
+            result = self._extract_points_and_metadata(map_elem)
             if result is not None:
                 points, extras = result
                 polyline_inds.extend([len(polylines)] * points.shape[0])
@@ -64,7 +64,7 @@ class MapElementKDTree:
 
     def _extract_points_and_metadata(
         self, map_element: MapElement
-    ) -> Optional[Tuple[np.ndarray, dict[str, np.ndarray]]]:
+    ) -> Optional[Tuple[np.ndarray, Dict[str, np.ndarray]]]:
         """Defines the coordinates we want to store in the KDTree for a MapElement.
         Args:
             map_element (MapElement): the MapElement to store in the KDTree.
@@ -73,7 +73,7 @@ class MapElementKDTree:
                 If None, the MapElement will not be stored.
                 Else, tuple of
                     np.ndarray: [B,d] set of B d-dimensional points to add,
-                    dict[str, np.ndarray] mapping names to meta-information about the points
+                    Dict[str, np.ndarray] mapping names to meta-information about the points
         """
         raise NotImplementedError()
 
@@ -116,7 +116,9 @@ class LaneCenterKDTree(MapElementKDTree):
         self.max_segment_len = max_segment_len
         super().__init__(vector_map)
 
-    def _extract_points(self, map_element: MapElement) -> Optional[np.ndarray]:
+    def _extract_points_and_metadata(
+        self, map_element: MapElement
+    ) -> Optional[Tuple[np.ndarray, Dict[str, np.ndarray]]]:
         if map_element.elem_type == MapElementType.ROAD_LANE:
             pts: Polyline = map_element.center
             if self.max_segment_len is not None:

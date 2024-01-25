@@ -136,7 +136,7 @@ class TestCollation(unittest.TestCase):
 
     def test_zero_neighbor_dict_collation(self):
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="agent",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -154,7 +154,7 @@ class TestCollation(unittest.TestCase):
             num_workers=0,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 
@@ -179,7 +179,7 @@ class TestCollation(unittest.TestCase):
                 break
 
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="scene",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -197,7 +197,7 @@ class TestCollation(unittest.TestCase):
             num_workers=0,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 

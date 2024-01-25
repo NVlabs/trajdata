@@ -13,7 +13,7 @@ from trajdata.dataset import UnifiedDataset
 class TestDataset(unittest.TestCase):
     def test_dataloading(self):
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="agent",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -31,7 +31,7 @@ class TestDataset(unittest.TestCase):
             num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 
@@ -60,7 +60,7 @@ class TestDataset(unittest.TestCase):
 
     def test_dict_dataloading(self):
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="agent",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -78,7 +78,7 @@ class TestDataset(unittest.TestCase):
             num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 
@@ -103,7 +103,7 @@ class TestDataset(unittest.TestCase):
                 break
 
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="scene",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -121,7 +121,7 @@ class TestDataset(unittest.TestCase):
             num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 
@@ -149,7 +149,7 @@ class TestDataset(unittest.TestCase):
 
     def test_default_datatypes_agent(self):
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="agent",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -167,7 +167,7 @@ class TestDataset(unittest.TestCase):
             num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 
@@ -179,7 +179,7 @@ class TestDataset(unittest.TestCase):
 
     def test_default_datatypes_scene(self):
         dataset = UnifiedDataset(
-            desired_data=["lyft_sample-mini_val"],
+            desired_data=["nusc_mini-mini_val"],
             centric="scene",
             desired_dt=0.1,
             history_sec=(3.2, 3.2),
@@ -197,7 +197,7 @@ class TestDataset(unittest.TestCase):
             num_workers=4,
             verbose=True,
             data_dirs={  # Remember to change this to match your filesystem!
-                "lyft_sample": "~/datasets/lyft_sample/scenes/sample.zarr",
+                "nusc_mini": "~/datasets/nuScenes",
             },
         )
 

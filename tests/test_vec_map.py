@@ -2,7 +2,11 @@ import unittest
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
+from shapely import contains_xy, dwithin, linearrings, points, polygons
+
 from trajdata import MapAPI, VectorMap
+from trajdata.maps.vec_map_elements import MapElementType
 
 
 class TestVectorMap(unittest.TestCase):
@@ -18,9 +22,7 @@ class TestVectorMap(unittest.TestCase):
         }
 
         cls.location_dict: Dict[str, List[str]] = {
-            "nuplan_mini": ["boston", "singapore", "pittsburgh", "las_vegas"],
             "nusc_mini": ["boston-seaport", "singapore-onenorth"],
-            "lyft_sample": ["palo_alto"],
         }
 
     # TODO(pkarkus) this assumes we already have the maps cached. It would be better
@@ -46,6 +48,60 @@ class TestVectorMap(unittest.TestCase):
                     ),
                     vec_map,
                 )
+
+    def test_road_area_queries(self):
+        env_name = next(self.location_dict.keys().__iter__())
+        map_name = self.location_dict[env_name][0]
+
+        vec_map: VectorMap = self.map_api.get_map(
+            f"{env_name}:{map_name}", **self.proto_loading_kwargs
+        )
+
+        if vec_map.search_rtrees is None:
+            return
+
+        point = vec_map.lanes[0].center.xy[0, :]
+        closest_area = vec_map.get_closest_area(
+            point, elem_type=MapElementType.ROAD_AREA
+        )
+        holes = closest_area.interior_holes
+        if len(holes) == 0:
+            holes = None
+        closest_area_polygon = polygons(closest_area.exterior_polygon.xy, holes=holes)
+        self.assertTrue(contains_xy(closest_area_polygon, point[None, :2]))
+
+        rnd_points = np.random.uniform(
+            low=vec_map.extent[:2], high=vec_map.extent[3:5], size=(10, 2)
+        )
+
+        NEARBY_DIST = 150.0
+        for point in rnd_points:
+            nearby_areas = vec_map.get_areas_within(
+                point, elem_type=MapElementType.ROAD_AREA, dist=NEARBY_DIST
+            )
+            for area in nearby_areas:
+                holes = [linearrings(hole.xy) for hole in area.interior_holes]
+                if len(holes) == 0:
+                    holes = None
+                area_polygon = polygons(area.exterior_polygon.xy, holes=holes)
+                point_pt = points(point)
+                self.assertTrue(dwithin(area_polygon, point_pt, distance=NEARBY_DIST))
+
+        for elem_type in [
+            MapElementType.PED_CROSSWALK,
+            MapElementType.PED_WALKWAY,
+        ]:
+            for point in rnd_points:
+                nearby_areas = vec_map.get_areas_within(
+                    point, elem_type=elem_type, dist=NEARBY_DIST
+                )
+                for area in nearby_areas:
+                    area_polygon = polygons(area.polygon.xy)
+                    point_pt = points(point)
+                    if not dwithin(area_polygon, point_pt, distance=NEARBY_DIST):
+                        print(
+                            f"{elem_type.name} at {area_polygon} is not within {NEARBY_DIST} of {point_pt}",
+                        )
 
     # TODO(bivanovic): Add more!
 

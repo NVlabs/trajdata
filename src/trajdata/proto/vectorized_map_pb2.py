@@ -115,7 +115,6 @@ PedWalkway = _reflection.GeneratedProtocolMessageType(
 _sym_db.RegisterMessage(PedWalkway)
 
 if _descriptor._USE_C_DESCRIPTORS == False:
-
     DESCRIPTOR._options = None
     _VECTORIZEDMAP._serialized_start = 35
     _VECTORIZEDMAP._serialized_end = 211

@@ -441,8 +441,6 @@ class SceneBatchElement:
                 **vector_map_params if vector_map_params is not None else None,
             )
 
-        self.scene_id = scene_time.scene.name
-
         ### ROBOT DATA ###
         self.robot_future_np: Optional[StateArray] = None
 
@@ -506,7 +504,6 @@ class SceneBatchElement:
         future_sec: Tuple[Optional[float], Optional[float]],
         nearby_agents: List[AgentMetadata],
     ) -> Tuple[List[StateArray], List[np.ndarray], np.ndarray]:
-
         (
             agent_futures,
             agent_future_extents,
