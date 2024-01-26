@@ -28,11 +28,14 @@ pip install "trajdata[lyft]"
 # For Waymo
 pip install "trajdata[waymo]"
 
+# For Yandex Shifts Motion Dataset
+pip install "trajdata[ysdc]"
+
 # For INTERACTION
 pip install "trajdata[interaction]"
 
 # All
-pip install "trajdata[nusc,lyft,waymo,interaction]"
+pip install "trajdata[nusc,lyft,waymo,interaction,ysdc]"
 ```
 Then, download the raw datasets (nuScenes, Lyft Level 5, ETH/UCY, etc.) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
 
@@ -103,6 +106,9 @@ Currently, the dataloader supports interfacing with the following datasets:
 | Waymo Open Motion Training | `waymo_train` | `train` | N/A | Waymo Open Motion Dataset `training` split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Validation | `waymo_val` | `val` | N/A | Waymo Open Motion Dataset `validation` split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Testing | `waymo_test` | `test` | N/A | Waymo Open Motion Dataset `testing` split | 0.1s (10Hz) | :white_check_mark: |
+| Yandex Shifts Motion Dataset Training | `ysdc_train` | `train` | N/A | Yandex Shifts Motion Dataset `training` split | 0.2s (5Hz) | :white_check_mark: |
+| Yandex Shifts Motion Dataset Development | `ysdc_development` | `development` | N/A | Yandex Shifts Motion Dataset `development` split | 0.2s (5Hz) | :white_check_mark: |
+| Yandex Shifts Motion Dataset Evaluation | `ysdc_eval` | `eval` | N/A | Yandex Shifts Motion Dataset `eval` split | 0.2 (5Hz) | :white_check_mark: |
 | Lyft Level 5 Train | `lyft_train` | `train` | `palo_alto` | Lyft Level 5 training data - part 1/2 (8.4 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Train Full | `lyft_train_full` | `train` | `palo_alto` | Lyft Level 5 training data - part 2/2 (70 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Validation | `lyft_val` | `val` | `palo_alto` | Lyft Level 5 validation data (8.2 GB) | 0.1s (10Hz) | :white_check_mark: |

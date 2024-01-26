@@ -23,8 +23,11 @@ class NoiseHistories(BatchAugmentation):
         )
 
         if agent_batch.history_pad_dir == PadDirection.BEFORE:
-            agent_hist_noise[..., -1, :] = 0
-            neigh_hist_noise[..., -1, :] = 0
+            try:
+                agent_hist_noise[..., -1, :] = 0
+                neigh_hist_noise[..., -1, :] = 0
+            except IndexError:
+                pass
         else:
             len_mask = ~mask_up_to(
                 agent_batch.agent_hist_len,

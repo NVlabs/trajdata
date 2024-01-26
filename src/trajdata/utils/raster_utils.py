@@ -200,22 +200,22 @@ def rasterize_map(
                     line_color=(0, 255, 0),
                 )
 
-            # # This code helps visualize centerlines to check if the inferred headings are correct.
-            # center_pts = cv2_subpixel(
-            #     transform_points(
-            #         proto_to_np(map_elem.road_lane.center, incl_heading=False),
-            #         raster_from_world,
-            #     )
-            # )[..., :2]
+            # This code helps visualize centerlines to check if the inferred headings are correct.
+            center_pts = cv2_subpixel(
+                map_utils.transform_points(
+                    map_elem.center.xyz,
+                    raster_from_world,
+                )
+            )[..., :2]
 
-            # # Drawing lane centerlines.
-            # cv2.polylines(
-            #     img=lane_line_img,
-            #     pts=center_pts[None, :, :],
-            #     isClosed=False,
-            #     color=(255, 0, 0),
-            #     **CV2_SUB_VALUES,
-            # )
+            # Drawing lane centerlines.
+            cv2.polylines(
+                img=lane_line_img,
+                pts=center_pts[None, :, :],
+                isClosed=False,
+                color=(255, 0, 0),
+                **CV2_SUB_VALUES,
+            )
 
             # headings = np.asarray(map_elem.road_lane.center.h_rad)
             # delta = cv2_subpixel(30*np.array([np.cos(headings[0]), np.sin(headings[0])]))
