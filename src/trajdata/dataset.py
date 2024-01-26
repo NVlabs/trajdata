@@ -528,7 +528,7 @@ class UnifiedDataset(Dataset):
             print(f"Loading cache from {cache_path} ...", end="")
             t = time.time()
             with open(cache_path, "rb") as f:
-                self._cached_batch_elements, keep_mask = dill.load(f, encoding="latin1")
+                self._cached_batch_elements, keep_ids = dill.load(f, encoding="latin1")
             print(f" done in {time.time() - t:.1f}s.")
 
         else:
