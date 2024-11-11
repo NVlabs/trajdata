@@ -38,6 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+av2 = ["av2==0.2.1"]
 dev = ["black", "isort", "pytest", "pytest-xdist", "twine", "build"]
 interaction = ["lanelet2==1.2.1"]
 lyft = ["l5kit==1.5.0"]
