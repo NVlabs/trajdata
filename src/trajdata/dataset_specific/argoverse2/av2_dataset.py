@@ -3,6 +3,11 @@ from typing import Any, Dict, List, Tuple, Type
 
 import pandas as pd
 import tqdm
+from av2.datasets.motion_forecasting.constants import (
+    AV2_SCENARIO_OBS_TIMESTEPS,
+    AV2_SCENARIO_STEP_HZ,
+    AV2_SCENARIO_TOTAL_TIMESTEPS,
+)
 
 from trajdata.caching.env_cache import EnvCache
 from trajdata.caching.scene_cache import SceneCache
@@ -21,9 +26,7 @@ from trajdata.dataset_specific.scene_records import Argoverse2Record
 from trajdata.utils import arr_utils
 
 AV2_MOTION_FORECASTING = "av2_motion_forecasting"
-AV2_DT = 0.1
-AV2_N_TIMESTEPS_TRAINVAL = 110
-AV2_N_TIMESTEPS_TEST = 50
+AV2_DT = 1 / AV2_SCENARIO_STEP_HZ
 
 
 class Av2Dataset(RawDataset):
@@ -104,9 +107,9 @@ class Av2Dataset(RawDataset):
             location=scenario_name,
             data_split=data_split,
             length_timesteps=(
-                AV2_N_TIMESTEPS_TEST
+                AV2_SCENARIO_OBS_TIMESTEPS
                 if data_split == "test"
-                else AV2_N_TIMESTEPS_TRAINVAL
+                else AV2_SCENARIO_TOTAL_TIMESTEPS
             ),
             raw_data_idx=data_idx,
             data_access_info=None,
@@ -141,7 +144,7 @@ class Av2Dataset(RawDataset):
 
                 df_records.append(
                     {
-                        "agent_id": track.track_id,
+                        "agent_id": track_metadata.name,
                         "scene_ts": object_state.timestep,
                         "x": object_state.position[0],
                         "y": object_state.position[1],

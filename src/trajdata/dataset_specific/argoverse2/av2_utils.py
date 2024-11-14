@@ -234,8 +234,13 @@ def get_track_metadata(track: Track) -> Optional[AgentMetadata]:
     if not timesteps:
         return None
 
+    # Av2 uses the name "AV" for the robot. Trajdata expects the name "ego" for the robot.
+    name = track.track_id
+    if name == "AV":
+        name = "ego"
+
     return AgentMetadata(
-        name=track.track_id,
+        name=name,
         agent_type=agent_type,
         first_timestep=min(timesteps),
         last_timestep=max(timesteps),
