@@ -1,6 +1,11 @@
 from typing import NamedTuple
 
 
+class Argoverse2Record(NamedTuple):
+    name: str
+    data_idx: int
+
+
 class EUPedsRecord(NamedTuple):
     name: str
     location: str

@@ -188,3 +188,30 @@ It should look like this after downloading:
 ```
 
 **Note**: Only the annotations need to be downloaded (not the videos).
+
+
+## Argoverse 2 Motion Forecasting
+The dataset can be downloaded from [here](https://www.argoverse.org/av2.html#download-link).
+
+It should look like this after downloading:
+```
+/path/to/av2mf/
+            ├── train/
+            |   ├── 0000b0f9-99f9-4a1f-a231-5be9e4c523f7/
+            |   |   ├── log_map_archive_0000b0f9-99f9-4a1f-a231-5be9e4c523f7.json
+            |   |   └── scenario_0000b0f9-99f9-4a1f-a231-5be9e4c523f7.parquet
+            |   ├── 0000b6ab-e100-4f6b-aee8-b520b57c0530/
+            |   |   ├── log_map_archive_0000b6ab-e100-4f6b-aee8-b520b57c0530.json
+            |   |   └── scenario_0000b6ab-e100-4f6b-aee8-b520b57c0530.parquet
+            |   └── ...
+            ├── val/
+            |   ├── 00010486-9a07-48ae-b493-cf4545855937/
+            |   |   ├── log_map_archive_00010486-9a07-48ae-b493-cf4545855937.json
+            |   |   └── scenario_00010486-9a07-48ae-b493-cf4545855937.parquet
+            |   └── ...
+            └── test/
+                ├── 0000b329-f890-4c2b-93f2-7e2413d4ca5b/
+                |   ├── log_map_archive_0000b329-f890-4c2b-93f2-7e2413d4ca5b.json
+                |   └── scenario_0000b329-f890-4c2b-93f2-7e2413d4ca5b.parquet
+                └── ...
+```
