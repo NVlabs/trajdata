@@ -39,6 +39,7 @@ class AgentBatchElement:
         self.cache: SceneCache = cache
         self.data_index: int = data_index
         self.dt: float = scene_time_agent.scene.dt
+        self.track_info = scene_time_agent.scene.data_access_info
         self.scene_ts: int = scene_time_agent.ts
         self.history_sec = history_sec
         self.future_sec = future_sec
@@ -341,6 +342,7 @@ class SceneBatchElement:
         self.data_index = data_index
         self.dt: float = scene_time.scene.dt
         self.scene_ts: int = scene_time.ts
+        self.track_info = scene_time.scene.data_access_info
 
         if max_agent_num is not None:
             scene_time.agents = scene_time.agents[:max_agent_num]

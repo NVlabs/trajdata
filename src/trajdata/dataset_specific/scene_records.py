@@ -53,3 +53,14 @@ class NuPlanSceneRecord(NamedTuple):
     split: str
     # desc: str
     data_idx: int
+
+
+class YandexShiftsSceneRecord(NamedTuple):
+    name: str
+    length: str
+    data_idx: int
+    day_time: str
+    season: str
+    track: str
+    sun_phase: str
+    precipitation: str
