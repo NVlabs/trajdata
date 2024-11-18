@@ -44,6 +44,7 @@ interaction = ["lanelet2==1.2.1"]
 lyft = ["l5kit==1.5.0"]
 nusc = ["nuscenes-devkit==1.1.9"]
 waymo = ["tensorflow==2.11.0", "waymo-open-dataset-tf-2-11-0", "intervaltree"]
+vod = ["vod-devkit==1.1.0"]
 
 [project.urls]
 "Homepage" = "https://github.com/nvr-avg/trajdata"

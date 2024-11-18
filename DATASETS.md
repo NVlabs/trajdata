@@ -1,5 +1,16 @@
 # Supported Datasets and Required Formats
 
+## View-of-Delft 
+Nothing special needs to be done for the View-of-Delft Prediction dataset, simply download it as per [the instructions in the devkit README](https://github.com/tudelft-iv/view-of-delft-prediction-devkit?tab=readme-ov-file#vod-p-setup).
+
+It should look like this after downloading:
+```
+/path/to/VoD/
+            ├── maps/
+            ├── v1.0-test/
+            └── v1.0-trainval/
+```
+
 ## nuScenes
 Nothing special needs to be done for the nuScenes dataset, simply download it as per [the instructions in the devkit README](https://github.com/nutonomy/nuscenes-devkit#nuscenes-setup).
 
