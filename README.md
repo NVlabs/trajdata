@@ -17,7 +17,7 @@ The easiest way to install trajdata is through PyPI with
 pip install trajdata
 ```
 
-In case you would also like to use datasets such as nuScenes, Lyft Level 5, or Waymo Open Motion Dataset (which require their own devkits to access raw data or additional package dependencies), the following will also install the respective devkits and/or package dependencies.
+In case you would also like to use datasets such as nuScenes, Lyft Level 5, View-of-Delft, or Waymo Open Motion Dataset (which require their own devkits to access raw data or additional package dependencies), the following will also install the respective devkits and/or package dependencies.
 ```sh
 # For nuScenes
 pip install "trajdata[nusc]"
@@ -31,10 +31,13 @@ pip install "trajdata[waymo]"
 # For INTERACTION
 pip install "trajdata[interaction]"
 
+# For View-of-Delft 
+pip install "trajdata[vod]"
+
 # All
-pip install "trajdata[nusc,lyft,waymo,interaction]"
+pip install "trajdata[nusc,lyft,waymo,interaction,vod]"
 ```
-Then, download the raw datasets (nuScenes, Lyft Level 5, ETH/UCY, etc.) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
+Then, download the raw datasets (nuScenes, Lyft Level 5, View-of-Delft, ETH/UCY, etc.) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
 
 ### Package Developer Installation
 
@@ -100,6 +103,8 @@ Currently, the dataloader supports interfacing with the following datasets:
 | nuPlan Validation | `nuplan_val` | N/A | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan validation split (90.30 GB) | 0.05s (20Hz) | :white_check_mark: |
 | nuPlan Test | `nuplan_test` | N/A | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan testing split (89.33 GB) | 0.05s (20Hz) | :white_check_mark: |
 | nuPlan Mini | `nuplan_mini` | `mini_train`, `mini_val`, `mini_test` | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan mini training/validation/test splits (942/197/224 scenes, 7.96 GB) | 0.05s (20Hz) | :white_check_mark: |
+| View-of-Delft Train/TrainVal/Val | `vod_trainval` | `train`, `train_val`, `val` | `delft` | View-of-Delft Prediction training and validation splits | 0.1s (10Hz) | :white_check_mark: |
+| View-of-Delft Test | `vod_test` | `test` | `delft` | View-of-Delft Prediction test split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Training | `waymo_train` | `train` | N/A | Waymo Open Motion Dataset `training` split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Validation | `waymo_val` | `val` | N/A | Waymo Open Motion Dataset `validation` split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Testing | `waymo_test` | `test` | N/A | Waymo Open Motion Dataset `testing` split | 0.1s (10Hz) | :white_check_mark: |

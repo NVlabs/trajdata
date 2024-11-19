@@ -9,6 +9,11 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
         return NuscDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
 
+    if "vod" in dataset_name:
+        from trajdata.dataset_specific.vod import VODDataset
+
+        return VODDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
+
     if "lyft" in dataset_name:
         from trajdata.dataset_specific.lyft import LyftDataset
 

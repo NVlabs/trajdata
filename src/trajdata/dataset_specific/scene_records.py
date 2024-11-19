@@ -34,6 +34,15 @@ class NuscSceneRecord(NamedTuple):
     data_idx: int
 
 
+class VODSceneRecord(NamedTuple):
+    token: str
+    name: str
+    location: str
+    length: str
+    desc: str
+    data_idx: int
+
+
 class LyftSceneRecord(NamedTuple):
     name: str
     length: str
