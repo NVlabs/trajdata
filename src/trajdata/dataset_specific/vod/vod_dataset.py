@@ -5,8 +5,6 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import pandas as pd
 from tqdm import tqdm
-
-# from vod.eval.prediction.splits import NUM_IN_TRAIN_VAL
 from vod.map_expansion.map_api import VODMap, locations
 from vod.utils.splits import create_splits_scenes
 from vod.vod import VOD
@@ -30,16 +28,11 @@ from trajdata.maps import VectorMap
 
 class VODDataset(RawDataset):
     def compute_metadata(self, env_name: str, data_dir: str) -> EnvMetadata:
-        # We're using the VoD test split here.
-        # See TODO
+        # See https://github.com/tudelft-iv/view-of-delft-prediction-devkit/blob/main/src/vod/utils/splits.py
         # for full details on how the splits are obtained below.
         all_scene_splits: Dict[str, List[str]] = create_splits_scenes()
 
         train_scenes: List[str] = deepcopy(all_scene_splits["train"])
-
-        NUM_IN_TRAIN_VAL = round(0.8 * len(train_scenes))
-        all_scene_splits["train"] = train_scenes[NUM_IN_TRAIN_VAL:]
-        all_scene_splits["train_val"] = train_scenes[:NUM_IN_TRAIN_VAL]
 
         if env_name == "vod_trainval":
             vod_scene_splits: Dict[str, List[str]] = {
@@ -62,17 +55,16 @@ class VODDataset(RawDataset):
                 ("delft",),
             ]
 
-            warnings.warn("Beware, vod_test has no annotations!")
-        elif env_name == "vod_mini":
-            vod_scene_splits: Dict[str, List[str]] = {
-                k: all_scene_splits[k] for k in ["mini_train", "mini_val"]
-            }
+        # elif env_name == "vod_mini":
+        #     vod_scene_splits: Dict[str, List[str]] = {
+        #         k: all_scene_splits[k] for k in ["mini_train", "mini_val"]
+        #     }
 
-            # VoD possibilities are the Cartesian product of these
-            dataset_parts: List[Tuple[str, ...]] = [
-                ("mini_train", "mini_val"),
-                ("delft",),
-            ]
+        #     # VoD possibilities are the Cartesian product of these
+        #     dataset_parts: List[Tuple[str, ...]] = [
+        #         ("mini_train", "mini_val"),
+        #         ("delft",),
+        #     ]
         else:
             raise ValueError(f"Unknown VoD environment name: {env_name}")
 
@@ -96,12 +88,12 @@ class VODDataset(RawDataset):
         if verbose:
             print(f"Loading {self.name} dataset...", flush=True)
 
-        if self.name == "vod_mini":
-            version_str = "v1.0-mini"
-        elif self.name == "vod_trainval":
+        if self.name == "vod_trainval":
             version_str = "v1.0-trainval"
         elif self.name == "vod_test":
             version_str = "v1.0-test"
+        # elif self.name == "vod_mini":
+        #     version_str = "v1.0-mini"
 
         self.dataset_obj = VOD(version=version_str, dataroot=self.metadata.data_dir)
 
