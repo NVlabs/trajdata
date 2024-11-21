@@ -53,7 +53,7 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "highD" in dataset_name:
         from trajdata.dataset_specific.highD import HighDDataset
 
-        return HighDDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
+        return HighDDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
 
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
