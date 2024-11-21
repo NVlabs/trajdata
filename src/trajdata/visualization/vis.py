@@ -103,7 +103,9 @@ def draw_map(
 ):
     patch_size: int = map.shape[-1]
     map_array = RasterizedMap.to_img(map.cpu())
-    brightened_map_array = map_array * 0.2 + 0.8
+    if alpha > 1.0 or alpha < 0.0:
+        raise ValueError("alpha must be between 0 and 1")
+    brightened_map_array = map_array * alpha + (1 - alpha)
 
     im = ax.imshow(
         brightened_map_array,
@@ -242,6 +244,7 @@ def plot_agent_batch(
     legend: bool = True,
     show: bool = True,
     close: bool = True,
+    alpha: float = 0.2,
 ) -> None:
     if ax is None:
         _, ax = plt.subplots()
@@ -262,7 +265,7 @@ def plot_agent_batch(
 
         agent_from_raster_tf: Tensor = agent_from_world_tf @ world_from_raster_tf
 
-        draw_map(ax, batch.maps[batch_idx], agent_from_raster_tf, alpha=1.0)
+        draw_map(ax, batch.maps[batch_idx], agent_from_raster_tf, alpha)
 
     agent_hist = batch.agent_hist[batch_idx].cpu()
     agent_fut = batch.agent_fut[batch_idx].cpu()
