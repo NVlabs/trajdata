@@ -4,6 +4,11 @@ from trajdata.dataset_specific import RawDataset
 
 
 def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
+    if "r2t" in dataset_name:
+        from trajdata.dataset_specific.r2t import Rank2TellTrajdataDataset
+
+        return Rank2TellTrajdataDataset(dataset_name, data_dir, parallelizable=False, has_maps=False)
+
     if "nusc" in dataset_name:
         from trajdata.dataset_specific.nusc import NuscDataset
 

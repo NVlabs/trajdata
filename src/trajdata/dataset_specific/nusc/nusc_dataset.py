@@ -77,7 +77,6 @@ class NuscDataset(RawDataset):
         nusc_scene_split_map: Dict[str, str] = {
             v_elem: k for k, v in nusc_scene_splits.items() for v_elem in v
         }
-
         return EnvMetadata(
             name=env_name,
             data_dir=data_dir,
@@ -262,6 +261,13 @@ class NuscDataset(RawDataset):
         agent_list: List[AgentMetadata] = [ego_agent_info] + list(
             existing_agents.values()
         )
+        print(f"{len(agent_list)=}")
+        for l in agent_presence:
+            print(f"{len(l)=}")
+        print(f"{agent_list[0]=}")
+        print(f"{ego_agent=}")
+
+        import ipdb; ipdb.set_trace()
 
         cache_class.save_agent_data(pd.concat(agent_data_list), cache_path, scene)
 

@@ -26,6 +26,12 @@ class InteractionRecord(NamedTuple):
     data_idx: int
 
 
+class R2tSceneRecord(NamedTuple):
+    name: str
+    length: str
+    data_idx: int
+
+
 class NuscSceneRecord(NamedTuple):
     name: str
     location: str
