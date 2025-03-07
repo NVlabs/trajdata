@@ -261,7 +261,8 @@ class Rank2TellTrajdataDataset(RawDataset):
 
         scene_data.set_index(["agent_id", "scene_ts"], inplace=True)
         scene_data.sort_index(inplace=True)
-        scene_data.reset_index(level=1, inplace=True)
+        scene_data = scene_data[~scene_data.index.duplicated(keep='first')]  # Keeps first occurrence of duplicates s.t. each agent, ts pair is unique
+        scene_data.reset_index(inplace=True)#level=1, inplace=True)
 
         agent_ids: np.ndarray = scene_data.index.get_level_values(0).to_numpy()
 
@@ -270,7 +271,6 @@ class Rank2TellTrajdataDataset(RawDataset):
             [] for _ in range(scene.length_timesteps)
         ]
         agents_to_remove: List[int] = list()
-
 
         for agent_id, data in scene_data.groupby("agent_id"):
             frames = data["scene_ts"]
@@ -293,108 +293,33 @@ class Rank2TellTrajdataDataset(RawDataset):
                     start_frame = contiguous_frame[0]
                     last_frame = contiguous_frame[-1]
                     assert last_frame<1000
+                    new_agent_id = f'{agent_id}_{idx}'
                     agent_metadata = AgentMetadata(
-                        name=f'{agent_id}_{idx}',
-                        agent_type=nusc_type_to_unified_type(data['agent_type'][0]),
+                        name=new_agent_id,
+                        agent_type=nusc_type_to_unified_type(data['agent_type'].iloc[0]),
                         first_timestep=start_frame,
                         last_timestep=last_frame,
-                        extent=FixedExtent(length=data['length'][0], width=data['width'][0], height=data['height'][0]),
+                        extent=FixedExtent(length=data['length'].iloc[0], width=data['width'].iloc[0], height=data['height'].iloc[0]),
                     )
                     agent_list.append(agent_metadata)
                     for frame in contiguous_frame:
                         agent_presence[frame].append(agent_metadata)
-                # raise ValueError("missing frames :(")
+
+                    # update df with new agent_ids
+                    scene_data.loc[scene_data['scene_ts'].isin(contiguous_frame) & (scene_data['agent_id'] == agent_id), 'agent_id'] = new_agent_id
             else:
                 assert last_frame<1000
                 agent_metadata = AgentMetadata(
                     name=agent_id,
-                    agent_type=nusc_type_to_unified_type(data['agent_type'][0]),
+                    agent_type=nusc_type_to_unified_type(data['agent_type'].iloc[0]),
                     first_timestep=start_frame,
                     last_timestep=last_frame,
-                    extent=FixedExtent(length=data['length'][0], width=data['width'][0], height=data['height'][0]),
+                    extent=FixedExtent(length=data['length'].iloc[0], width=data['width'].iloc[0], height=data['height'].iloc[0]),
                 )
 
                 agent_list.append(agent_metadata)
                 for frame in frames:
                     agent_presence[frame].append(agent_metadata)
-
-
-        # unique_agents = scene_data.index.get_level_values('agent_id').unique()
-        # interpolated_dfs = []
-        # interps = []
-        # for agent_id in unique_agents:
-        #     # Extract rows for just this one agent
-        #     agent_df = scene_data.xs(agent_id).copy()
-
-        #     if agent_df['scene_ts'].shape[0] <= 1:
-        #         # There are some agents with only a single detection to them, we don't care about these.
-        #         agents_to_remove.append(agent_id)
-        #         continue
-           
-        #     # agent_df now has an index of just scene_ts for this agent
-        #     # We'll reset_index so scene_ts becomes a column.
-        #     agent_df.reset_index(inplace=True)
-            
-        #     # Find the full range of scene_ts
-        #     min_ts = agent_df['scene_ts'].min()
-        #     max_ts = agent_df['scene_ts'].max()
-        #     all_ts = np.arange(min_ts, max_ts + 1)
-            
-        #     # Reindex to fill missing frames
-        #     # This will insert rows with NaN values where frames are missing
-        #     agent_df = agent_df.drop_duplicates(subset=['scene_ts'])  # needed bc r2t is imperfect, may contain dups for same agent in a single ts
-        #     agent_df = agent_df.set_index('scene_ts').reindex(all_ts)
-
-        #     # keep track of interpolated regions
-        #     interpolated_regions = agent_df.isna().all(axis=1)
-        #     interpolated_regions = interpolated_regions[interpolated_regions].index
-        #     interpolated_contiguous_regions = np.split(interpolated_regions, np.where(np.diff(interpolated_regions) != 1)[0] + 1)
-        #     interps.append(interpolated_contiguous_regions)
-           
-        #     # Interpolate x, y, z. 'linear' works on numeric index
-        #     agent_df[['x', 'y', 'z']] = agent_df[['x', 'y', 'z']].interpolate(method='linear')
-        #     # interpolate heading. theta with wraparound
-        #     # agent_df['heading'] = 
-        #     agent_df['heading'] = pd.Series(
-        #         np.mod(
-        #             np.interp(
-        #                 agent_df.index, 
-        #                 agent_df.index[agent_df['heading'].notna()], 
-        #                 np.unwrap(agent_df['heading'].dropna())
-        #             ) + np.pi, 
-        #             2*np.pi
-        #         ) - np.pi,
-        #         index=agent_df.index
-        #     )
-            
-        #     # Forward/backward fill attributes that remain constant for this agent
-        #     agent_df[['length', 'width', 'height', 'agent_type']] = (
-        #         agent_df[['length', 'width', 'height', 'agent_type']]
-        #         .ffill()
-        #         .bfill()
-        #     )
-            
-        #     # Record agent_id and scene_ts in the columns for re-constructing the MultiIndex
-        #     agent_df['agent_id'] = agent_id
-        #     agent_df['scene_ts'] = agent_df.index
-            
-        #     interpolated_dfs.append(agent_df)
-        #     agent_metadata = AgentMetadata(
-        #         name=agent_id,
-        #         agent_type=nusc_type_to_unified_type(agent_df['agent_type'].iloc[0]),
-        #         first_timestep=min_ts,
-        #         last_timestep=max_ts,
-        #         extent=FixedExtent(length=agent_df['length'].iloc[0], width=agent_df['width'].iloc[0], height=agent_df['height'].iloc[0]),
-        #     )
-
-        #     agent_list.append(agent_metadata)
-        #     for frame in agent_df['scene_ts']:
-        #         agent_presence[frame].append(agent_metadata)
-
-        # # Concatenate and set the new MultiIndex (agent_id, scene_ts)
-        # df_interpolated = pd.concat(interpolated_dfs)
-        # df_interpolated.set_index(['agent_id', 'scene_ts'], inplace=True)
-        # scene_data = df_interpolated
 
         # if True:
         #     import matplotlib.pyplot as plt
@@ -413,6 +338,7 @@ class Rank2TellTrajdataDataset(RawDataset):
         #     plt.close()
 
         ### Calculating agent velocities
+        scene_data.set_index(["agent_id"], inplace=True)
         scene_data[["vx", "vy"]] = (
             arr_utils.agent_aware_diff(scene_data[["x", "y"]].to_numpy(), agent_ids)
             / R2T_DT
