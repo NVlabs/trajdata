@@ -165,7 +165,7 @@ class NuscDataset(RawDataset):
                 data_idx,
             ) = scene_record
             scene_split: str = self.metadata.scene_split_map[scene_name]
-
+            
             if scene_location.split("-")[0] in scene_tag and scene_split in scene_tag:
                 if scene_desc_contains is not None and not any(
                     desc_query in scene_desc for desc_query in scene_desc_contains
@@ -261,13 +261,6 @@ class NuscDataset(RawDataset):
         agent_list: List[AgentMetadata] = [ego_agent_info] + list(
             existing_agents.values()
         )
-        print(f"{len(agent_list)=}")
-        for l in agent_presence:
-            print(f"{len(l)=}")
-        print(f"{agent_list[0]=}")
-        print(f"{ego_agent=}")
-
-        import ipdb; ipdb.set_trace()
 
         cache_class.save_agent_data(pd.concat(agent_data_list), cache_path, scene)
 

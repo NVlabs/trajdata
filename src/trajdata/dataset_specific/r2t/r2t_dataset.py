@@ -30,17 +30,14 @@ class Rank2TellTrajdataDataset(RawDataset):
         if env_name != R2T_DATASET_NAME:
             raise ValueError(f"Unknown rank2tell env name: {env_name}")
 
-        split_to_scene_id = {}
+        scene_id_to_split = {}
         for split in R2T_SPLITS:
             split_path = osp.join(data_dir, 'processed', f'{split}_split.txt')
             with open(split_path, 'r') as f:
                 scenario_ids = [line.strip() for line in f]
-            split_to_scene_id[split] = scenario_ids
+            for scenario_id in scenario_ids:
+                scene_id_to_split[scenario_id] = split
 
-        # Inverting the dict from above, associating every scene with its data split.
-        scene_id_to_split: Dict[str, str] = {
-            v_elem: k for k, v in split_to_scene_id.items() for v_elem in v
-        }
         return EnvMetadata(
             name=env_name,
             data_dir=data_dir,
@@ -199,6 +196,10 @@ class Rank2TellTrajdataDataset(RawDataset):
                 R2tSceneRecord(scene_name, scene_length, idx)
             )
 
+            scene_split: str = self.metadata.scene_split_map[scene_name]
+            if scene_split not in scene_tag:
+                continue
+
             scene_metadata = SceneMetadata(
                 env_name=self.metadata.name,
                 name=scene_name,
@@ -222,6 +223,9 @@ class Rank2TellTrajdataDataset(RawDataset):
         for scene_record in all_scenes_list:
             scene_name, scene_length, data_idx = scene_record
             scene_split: str = self.metadata.scene_split_map[scene_name]
+
+            if scene_split not in scene_tag:
+                continue
 
             scene_metadata = Scene(
                 env_metadata=self.metadata,
@@ -262,7 +266,7 @@ class Rank2TellTrajdataDataset(RawDataset):
         scene_data.set_index(["agent_id", "scene_ts"], inplace=True)
         scene_data.sort_index(inplace=True)
         scene_data = scene_data[~scene_data.index.duplicated(keep='first')]  # Keeps first occurrence of duplicates s.t. each agent, ts pair is unique
-        scene_data.reset_index(inplace=True)#level=1, inplace=True)
+        scene_data.reset_index(inplace=True)
 
         agent_ids: np.ndarray = scene_data.index.get_level_values(0).to_numpy()
 
