@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Dict, List, Tuple, Type, Union
 
 import pandas as pd
 import tqdm
@@ -35,14 +35,13 @@ class Av2Dataset(RawDataset):
         if env_name != AV2_MOTION_FORECASTING:
             raise ValueError(f"Unknown Argoverse 2 env name: {env_name}")
 
-        scenario_ids = Av2ScenarioIds.create(Path(data_dir))
 
         return EnvMetadata(
             name=env_name,
             data_dir=data_dir,
             dt=AV2_DT,
             parts=[AV2_SPLITS],
-            scene_split_map=scenario_ids.scene_split_map,
+            scene_split_map=None,
             map_locations=None,
         )
 
@@ -54,7 +53,7 @@ class Av2Dataset(RawDataset):
     def _get_matching_scenes_from_obj(
         self,
         scene_tag: SceneTag,
-        scene_desc_contains: List[str] | None,
+        scene_desc_contains: Union[List[str], None],
         env_cache: EnvCache,
     ) -> List[SceneMetadata]:
         """Compute SceneMetadata for all samples from self.dataset_obj.
@@ -84,16 +83,20 @@ class Av2Dataset(RawDataset):
     def _get_matching_scenes_from_cache(
         self,
         scene_tag: SceneTag,
-        scene_desc_contains: List[str] | None,
+        scene_desc_contains: Union[List[str], None],
         env_cache: EnvCache,
     ) -> List[Scene]:
         """Computes Scene data for all samples by reading data from env_cache."""
         if scene_desc_contains:
             raise ValueError("Argoverse dataset does not support scene descriptions.")
 
+        splits = [s for s in AV2_SPLITS if s in scene_tag]
         record_list: List[Argoverse2Record] = env_cache.load_env_scenes_list(self.name)
+        assert len(splits) == 1, f"Expected 1 split in scene tag, but got {splits}"
+
         return [
             self._create_scene(record.name, record.data_idx) for record in record_list
+            if splits[0] in record.name
         ]
 
     def get_scene(self, scene_info: SceneMetadata) -> Scene:
