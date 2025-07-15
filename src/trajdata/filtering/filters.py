@@ -73,7 +73,7 @@ def satisfies_history(
 ) -> bool:
     if history_sec[0] is not None:
         min_history = ceil(Decimal(str(history_sec[0])) / Decimal(str(dt)))
-        agent_history_satisfies = ts - agent_info.first_timestep >= min_history
+        agent_history_satisfies = ts - agent_info.first_timestep + 1 >= min_history
     else:
         agent_history_satisfies = True
 
@@ -88,7 +88,7 @@ def satisfies_future(
 ) -> bool:
     if future_sec[0] is not None:
         min_future = ceil(Decimal(str(future_sec[0])) / Decimal(str(dt)))
-        agent_future_satisfies = agent_info.last_timestep - ts >= min_future
+        agent_future_satisfies = agent_info.last_timestep - ts  >= min_future
     else:
         agent_future_satisfies = True
 
