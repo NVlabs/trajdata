@@ -874,7 +874,8 @@ class UnifiedDataset(Dataset):
     ) -> Union[List[Scene], List[SceneMetadata]]:
         scenes_list: Union[List[Scene], List[SceneMetadata]] = list()
         for scene_tag in tqdm(
-            scene_tags, desc=f"Getting Scenes from {env.name}", disable=not self.verbose
+            scene_tags, desc=f"Getting Scenes from {env.name} with scene tag {scene_tags}",
+            disable=not self.verbose
         ):
             if env.name in scene_tag:
                 scenes_list += env.get_matching_scenes(
