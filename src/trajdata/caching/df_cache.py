@@ -750,6 +750,30 @@ class DataFrameCache(SceneCache):
         )
 
     @staticmethod
+    def cache_raster_map(
+        env_name: str,
+        data_idx: str,
+        cache_path: Path,
+        raster_map: np.ndarray,  # RasterizedMap,
+        raster_metadata: RasterizedMapMetadata,
+        map_params: Dict[str, Any],
+    ) -> None:
+        raster_resolution: float = map_params["px_per_m"]
+        maps_path: Path = DataFrameCache.get_maps_path(cache_path, env_name)
+        raster_map_path: Path = (
+            maps_path / f"{int(data_idx)+1}_{raster_resolution:.2f}px_m.zarr"
+        )
+        raster_metadata_path: Path = (
+            maps_path / f"{int(data_idx)+1}_{raster_resolution:.2f}px_m.dill"
+        )
+
+        maps_path.mkdir(parents=True, exist_ok=True)
+        zarr.save(raster_map_path, raster_map)
+
+        with open(raster_metadata_path, "wb") as f:
+            dill.dump(raster_metadata, f)
+
+    @staticmethod
     def finalize_and_cache_map(
         cache_path: Path,
         vector_map: VectorMap,
