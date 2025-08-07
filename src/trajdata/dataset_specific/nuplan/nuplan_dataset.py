@@ -74,9 +74,9 @@ class NuplanDataset(RawDataset):
             print(f"Loading {self.name} dataset...", flush=True)
 
         if self.name == "nuplan_mini":
-            subfolder = "mini"
+            subfolder = "dataset/nuplan-v1.1/mini"
         elif self.name.startswith("nuplan"):
-            subfolder = "trainval"
+            subfolder = "dataset/nuplan-v1.1/trainval"
 
         self.dataset_obj = nuplan_utils.NuPlanObject(self.metadata.data_dir, subfolder)
 
