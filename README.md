@@ -17,7 +17,7 @@ The easiest way to install trajdata is through PyPI with
 pip install trajdata
 ```
 
-In case you would also like to use datasets such as nuScenes, Lyft Level 5, View-of-Delft, or Waymo Open Motion Dataset (which require their own devkits to access raw data or additional package dependencies), the following will also install the respective devkits and/or package dependencies.
+In case you would also like to use datasets such as nuScenes, Lyft Level 5, or Waymo Open Motion Dataset (which require their own devkits to access raw data or additional package dependencies), the following will also install the respective devkits and/or package dependencies.
 ```sh
 # For nuScenes
 pip install "trajdata[nusc]"
@@ -31,13 +31,10 @@ pip install "trajdata[waymo]"
 # For INTERACTION
 pip install "trajdata[interaction]"
 
-# For View-of-Delft 
-pip install "trajdata[vod]"
-
 # All
-pip install "trajdata[nusc,lyft,waymo,interaction,vod]"
+pip install "trajdata[nusc,lyft,waymo,interaction]"
 ```
-Then, download the raw datasets (nuScenes, Lyft Level 5, View-of-Delft, ETH/UCY, etc.) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
+Then, download the raw datasets (nuScenes, Lyft Level 5, ETH/UCY, etc.) in case you do not already have them. For more information about how to structure dataset folders/files, please see [`DATASETS.md`](./DATASETS.md).
 
 ### Package Developer Installation
 
@@ -103,8 +100,6 @@ Currently, the dataloader supports interfacing with the following datasets:
 | nuPlan Validation | `nuplan_val` | N/A | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan validation split (90.30 GB) | 0.05s (20Hz) | :white_check_mark: |
 | nuPlan Test | `nuplan_test` | N/A | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan testing split (89.33 GB) | 0.05s (20Hz) | :white_check_mark: |
 | nuPlan Mini | `nuplan_mini` | `mini_train`, `mini_val`, `mini_test` | `boston`, `singapore`, `pittsburgh`, `las_vegas` | nuPlan mini training/validation/test splits (942/197/224 scenes, 7.96 GB) | 0.05s (20Hz) | :white_check_mark: |
-| View-of-Delft Train/TrainVal/Val | `vod_trainval` | `train`, `train_val`, `val` | `delft` | View-of-Delft Prediction training and validation splits | 0.1s (10Hz) | :white_check_mark: |
-| View-of-Delft Test | `vod_test` | `test` | `delft` | View-of-Delft Prediction test split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Training | `waymo_train` | `train` | N/A | Waymo Open Motion Dataset `training` split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Validation | `waymo_val` | `val` | N/A | Waymo Open Motion Dataset `validation` split | 0.1s (10Hz) | :white_check_mark: |
 | Waymo Open Motion Testing | `waymo_test` | `test` | N/A | Waymo Open Motion Dataset `testing` split | 0.1s (10Hz) | :white_check_mark: |
@@ -112,7 +107,6 @@ Currently, the dataloader supports interfacing with the following datasets:
 | Lyft Level 5 Train Full | `lyft_train_full` | `train` | `palo_alto` | Lyft Level 5 training data - part 2/2 (70 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Validation | `lyft_val` | `val` | `palo_alto` | Lyft Level 5 validation data (8.2 GB) | 0.1s (10Hz) | :white_check_mark: |
 | Lyft Level 5 Sample | `lyft_sample` | `mini_train`, `mini_val` | `palo_alto` | Lyft Level 5 sample data (100 scenes, randomly split 80/20 for training/validation) | 0.1s (10Hz) | :white_check_mark: |
-| Argoverse 2 Motion Forecasting | `av2_motion_forecasting` | `train`, `val`, `test` | N/A | 250,000 motion forecasting scenarios of 11s each | 0.1s (10Hz) | :white_check_mark: |
 | INTERACTION Dataset Single-Agent | `interaction_single` | `train`, `val`, `test`, `test_conditional` | `usa`, `china`, `germany`, `bulgaria` | Single-agent split of the INTERACTION Dataset (where the goal is to predict one target agents' future motion) | 0.1s (10Hz) | :white_check_mark: |
 | INTERACTION Dataset Multi-Agent | `interaction_multi` | `train`, `val`, `test`, `test_conditional` | `usa`, `china`, `germany`, `bulgaria` | Multi-agent split of the INTERACTION Dataset (where the goal is to jointly predict multiple agents' future motion) | 0.1s (10Hz) | :white_check_mark: |
 | ETH - Univ | `eupeds_eth` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `zurich` | The ETH (University) scene from the ETH BIWI Walking Pedestrians dataset | 0.4s (2.5Hz) | |
@@ -234,3 +228,12 @@ If you use this software, please cite it as follows:
 
 ## TODO
 - Create a method like finalize() which writes all the batch information to a TFRecord/WebDataset/some other format which is (very) fast to read from for higher epoch training.
+
+## Protobuf
+This branch is intended to compile protobuf files for use with Proto V4. In order to do this, install dev depedencies with `pip install trajdata[dev]` and use 
+
+```
+python -m grpc_tools.protoc --python_out=src/trajdata/proto --proto_path=src/trajdata/proto --experimental_allow_proto3_optional src/trajdata/proto/vectorized_map.proto
+```
+
+To compile the vector map protobuf. 

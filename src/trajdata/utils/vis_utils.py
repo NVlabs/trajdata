@@ -1,14 +1,16 @@
 from collections import defaultdict
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
+import bokeh
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from bokeh.io import export_png
 from bokeh.models import ColumnDataSource, GlyphRenderer
-from bokeh.plotting import figure
+from bokeh.plotting import curdoc, figure
+from PIL import Image
 from shapely.geometry import LineString, Polygon
-
 from trajdata.data_structures.agent import AgentType
 from trajdata.data_structures.batch import AgentBatch
 from trajdata.data_structures.state import StateArray
@@ -19,8 +21,13 @@ from trajdata.maps.vec_map_elements import (
     PedWalkway,
     RoadArea,
     RoadLane,
+    RoadEdge,
 )
-from trajdata.utils.arr_utils import transform_coords_2d_np
+from trajdata.utils.arr_utils import (
+    batch_nd_transform_points_np,
+    batch_nd_transform_points_pt,
+    transform_coords_2d_np,
+)
 
 
 def apply_default_settings(fig: figure) -> None:
@@ -82,23 +89,25 @@ def calculate_figure_sizes(
 
 
 def pretty_print_agent_type(agent_type: AgentType):
-    return str(agent_type)[len("AgentType.") :].capitalize()
+    return str(agent_type).capitalize()
 
 
 def agent_type_to_str(agent_type_int: int) -> str:
-    return pretty_print_agent_type(AgentType(agent_type_int))
+    return pretty_print_agent_type(AgentType(agent_type_int).name)
 
 
 def get_agent_type_color(agent_type: AgentType) -> str:
-    palette = sns.color_palette("husl", 4).as_hex()
+    palette = sns.color_palette("husl", 8).as_hex()
     if agent_type == AgentType.VEHICLE:
-        return palette[0]
+        return palette[3]
     elif agent_type == AgentType.PEDESTRIAN:
         return "darkorange"
     elif agent_type == AgentType.BICYCLE:
-        return palette[2]
+        return palette[5]
     elif agent_type == AgentType.MOTORCYCLE:
-        return palette[3]
+        return palette[7]
+    elif agent_type == 'EGO':
+        return palette[0]
     else:
         return "#A9A9A9"
 
@@ -213,8 +222,7 @@ def compute_agent_rects_coords(
 
     return agent_rect_coords, dir_patch_coords
 
-
-def extract_full_agent_data_df(batch: AgentBatch, batch_idx: int) -> pd.DataFrame:
+def extract_full_agent_data_df(batch: AgentBatch, batch_idx: int, violations) -> pd.DataFrame:
     main_data_dict = defaultdict(list)
 
     # Historical information
@@ -252,7 +260,9 @@ def extract_full_agent_data_df(batch: AgentBatch, batch_idx: int) -> pd.DataFram
     main_data_dict["length"].extend(lengths)
     main_data_dict["width"].extend(widths)
     main_data_dict["pred_agent"].extend([True] * H)
-    main_data_dict["color"].extend([get_agent_type_color(agent_type)] * H)
+    # main_data_dict["color"].extend([get_agent_type_color(agent_type)] * H)
+    main_data_dict["color"] = ["lightblue"] * H
+    main_data_dict["violation"] = [''] * H
 
     ## Neighbors
     num_neighbors: int = batch.num_neigh[batch_idx].item()
@@ -296,6 +306,7 @@ def extract_full_agent_data_df(batch: AgentBatch, batch_idx: int) -> pd.DataFram
         main_data_dict["width"].extend(widths)
         main_data_dict["pred_agent"].extend([False] * H)
         main_data_dict["color"].extend([get_agent_type_color(agent_type)] * H)
+        main_data_dict["violation"].extend([''] * H)
 
     # Future information
     ## Agent
@@ -332,8 +343,12 @@ def extract_full_agent_data_df(batch: AgentBatch, batch_idx: int) -> pd.DataFram
     main_data_dict["length"].extend(lengths)
     main_data_dict["width"].extend(widths)
     main_data_dict["pred_agent"].extend([True] * T)
-    main_data_dict["color"].extend([get_agent_type_color(agent_type)] * T)
-
+    main_data_dict["color"].extend(["lightblue"] * T)
+    main_data_dict["violation"].extend([''] * T)
+    # main_data_dict["color"].extend([get_agent_type_color(agent_type)] * T)
+    if violations is not None:
+        main_data_dict['color'][-T:len(main_data_dict['violation']) - T + len(violations)] = ['lightblue' if len(violation) == 0 else get_agent_type_color('EGO') for violation in violations]
+        main_data_dict['violation'][-T:len(main_data_dict['violation']) - T + len(violations)] = [','.join(violation) for violation in violations]
     ## Neighbors
     num_neighbors: int = batch.num_neigh[batch_idx].item()
 
@@ -374,6 +389,12 @@ def extract_full_agent_data_df(batch: AgentBatch, batch_idx: int) -> pd.DataFram
         main_data_dict["width"].extend(widths)
         main_data_dict["pred_agent"].extend([False] * T)
         main_data_dict["color"].extend([get_agent_type_color(agent_type)] * T)
+        main_data_dict['violation'].extend([''] * T)
+
+        # Fix: Ensure all lists are of the same length
+        min_lenght = min(len(v) for v in main_data_dict.values())
+        for k in main_data_dict.keys():
+            main_data_dict[k] = main_data_dict[k][:min_lenght]
 
     return pd.DataFrame(main_data_dict)
 
@@ -394,6 +415,8 @@ def convert_to_gpd(vec_map: VectorMap) -> gpd.GeoDataFrame:
                     holes=[hole.xyz for hole in elem.interior_holes],
                 )
             )
+        elif isinstance(elem, RoadEdge):
+            geo_data["geometry"].append(LineString(elem.polyline.xyz))
 
     return gpd.GeoDataFrame(geo_data)
 
@@ -408,12 +431,14 @@ def get_map_cds(
     ColumnDataSource,
     ColumnDataSource,
     ColumnDataSource,
+    ColumnDataSource,
 ]:
     road_lane_data = defaultdict(list)
     lane_center_data = defaultdict(list)
     ped_crosswalk_data = defaultdict(list)
     ped_walkway_data = defaultdict(list)
     road_area_data = defaultdict(list)
+    road_edge_data = defaultdict(list)
 
     map_gpd = convert_to_gpd(vec_map)
     affine_tf_params = (
@@ -467,12 +492,17 @@ def get_map_cds(
             road_area_data["ys"].append(
                 [[xy[..., 1]] + [hole[..., 1] for hole in holes_xy]]
             )
+        elif row['type'] == MapElementType.ROAD_EDGE:
+            xy = np.stack(row["geometry"].xy, axis=1)
+            road_edge_data["xs"].append(xy[..., 0])
+            road_edge_data["ys"].append(xy[..., 1])
     return (
         ColumnDataSource(data=lane_center_data),
         ColumnDataSource(data=road_lane_data),
         ColumnDataSource(data=ped_crosswalk_data),
         ColumnDataSource(data=ped_walkway_data),
         ColumnDataSource(data=road_area_data),
+        ColumnDataSource(data=road_edge_data),
     )
 
 
@@ -500,6 +530,7 @@ def draw_map_elems(
         ped_crosswalk_cds,
         ped_walkway_cds,
         road_area_cds,
+        road_edge_cds
     ) = get_map_cds(map_from_world_tf, vec_map, bbox)
 
     road_areas = fig.multi_polygons(
@@ -539,5 +570,12 @@ def draw_map_elems(
         line_color="gray",
         line_alpha=0.5,
     )
+    
+    if kwargs.get('incl_road_edges', True):
+        road_edges = fig.multi_line(
+            source=road_edge_cds,
+            line_color="red",
+            line_alpha=0.5,
+        )
 
     return road_areas, road_lanes, ped_crosswalks, ped_walkways, lane_centers

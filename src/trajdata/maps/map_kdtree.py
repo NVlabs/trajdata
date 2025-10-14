@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Iterator
 
 if TYPE_CHECKING:
     from trajdata.maps.vec_map import VectorMap
@@ -11,7 +11,6 @@ from typing import Optional, Tuple
 import numpy as np
 from scipy.spatial import KDTree
 from tqdm import tqdm
-
 from trajdata.maps.vec_map_elements import MapElement, MapElementType, Polyline
 from trajdata.utils.arr_utils import angle_wrap
 
@@ -43,8 +42,7 @@ class MapElementKDTree:
             total=len(vector_map),
             disable=not verbose,
         ):
-            result = self._extract_points_and_metadata(map_elem)
-            if result is not None:
+            for result in self._extract_points_and_metadata(map_elem):
                 points, extras = result
                 polyline_inds.extend([len(polylines)] * points.shape[0])
 
@@ -54,6 +52,7 @@ class MapElementKDTree:
 
                 for k, v in extras.items():
                     metadata[k].append(v)
+                metadata["map_elem_id"].append(np.array([map_elem.id]))
 
         points = np.concatenate(polylines, axis=0)
         polyline_inds = np.array(polyline_inds)
@@ -64,7 +63,7 @@ class MapElementKDTree:
 
     def _extract_points_and_metadata(
         self, map_element: MapElement
-    ) -> Optional[Tuple[np.ndarray, Dict[str, np.ndarray]]]:
+    ) -> Iterator[Tuple[np.ndarray, dict[str, np.ndarray]]]:
         """Defines the coordinates we want to store in the KDTree for a MapElement.
         Args:
             map_element (MapElement): the MapElement to store in the KDTree.
@@ -101,6 +100,33 @@ class MapElementKDTree:
         return np.unique(self.polyline_inds[data_inds], axis=0)
 
 
+class RoadEdgeKDTree(MapElementKDTree):
+    """KDTree for lane center polylines."""
+
+    def __init__(
+        self, vector_map: VectorMap, max_segment_len: Optional[float] = None
+    ) -> None:
+        """
+        Args:
+            vec_map: the VectorizedMap object to build the KDTree for
+            max_segment_len (float, optional): if specified, we will insert extra points into the KDTree
+                such that all polyline segments are shorter then max_segment_len.
+        """
+        self.max_segment_len = max_segment_len
+        super().__init__(vector_map)
+
+    def _extract_points_and_metadata(
+        self, map_element: MapElement
+    ) -> Iterator[Tuple[np.ndarray, dict[str, np.ndarray]]]:
+        if map_element.elem_type == MapElementType.ROAD_EDGE:
+            pts: Polyline = map_element.polyline
+            if self.max_segment_len is not None:
+                pts = pts.interpolate(max_dist=self.max_segment_len)
+
+            # We only want to store xyz in the kdtree, not heading.
+            yield pts.xyz, {"heading": pts.h}
+
+
 class LaneCenterKDTree(MapElementKDTree):
     """KDTree for lane center polylines."""
 
@@ -118,16 +144,14 @@ class LaneCenterKDTree(MapElementKDTree):
 
     def _extract_points_and_metadata(
         self, map_element: MapElement
-    ) -> Optional[Tuple[np.ndarray, Dict[str, np.ndarray]]]:
+    ) -> Iterator[Tuple[np.ndarray, dict[str, np.ndarray]]]:
         if map_element.elem_type == MapElementType.ROAD_LANE:
             pts: Polyline = map_element.center
             if self.max_segment_len is not None:
                 pts = pts.interpolate(max_dist=self.max_segment_len)
 
             # We only want to store xyz in the kdtree, not heading.
-            return pts.xyz, {"heading": pts.h}
-        else:
-            return None
+            yield pts.xyz, {"heading": pts.h}
 
     def current_lane_inds(
         self,
@@ -183,3 +207,41 @@ class LaneCenterKDTree(MapElementKDTree):
         min_costs = [np.min(costs[lane_inds == ind]) for ind in unique_lane_inds]
 
         return unique_lane_inds[np.argsort(min_costs)]
+
+
+class RoadAreaKDTree(MapElementKDTree):
+    """KDTree for road area polygons.
+    The polygons may have holes. We will simply store points along both the 
+    exterior_polygon and all interior_holes. Finding a nearest point in this KDTree will
+    correspond to finding any 
+    """
+
+    def __init__(
+        self, vector_map: VectorMap, max_segment_len: Optional[float] = None
+    ) -> None:
+        """
+        Args:
+            vec_map: the VectorizedMap object to build the KDTree for
+            max_segment_len (float, optional): if specified, we will insert extra points into the KDTree
+                such that all polyline segments are shorter then max_segment_len.
+        """
+        self.max_segment_len = max_segment_len
+        super().__init__(vector_map)
+
+    def _extract_points_and_metadata(
+        self, map_element: MapElement
+    ) -> Iterator[Tuple[np.ndarray, dict[str, np.ndarray]]]:
+        if map_element.elem_type == MapElementType.ROAD_AREA:
+            # Exterior polygon
+            pts: Polyline = map_element.exterior_polygon
+            if self.max_segment_len is not None:
+                pts = pts.interpolate(max_dist=self.max_segment_len)
+            # We only want to store xyz in the kdtree, not heading.
+            yield pts.xyz, {"exterior": np.array([True])}
+
+            # Interior holes
+            for pts in map_element.interior_holes:
+                if self.max_segment_len is not None:
+                    pts = pts.interpolate(max_dist=self.max_segment_len)
+                # We only want to store xyz in the kdtree, not heading.
+                yield pts.xyz, {"exterior": np.array([False])}

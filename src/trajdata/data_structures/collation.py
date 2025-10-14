@@ -4,10 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn.functional as F
-from kornia.geometry.transform import rotate
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
-
 from trajdata.augmentation import BatchAugmentation
 from trajdata.data_structures.batch import AgentBatch, SceneBatch
 from trajdata.data_structures.batch_element import AgentBatchElement, SceneBatchElement
@@ -34,250 +32,53 @@ def _collate_data(elems):
     else:
         return torch.as_tensor(np.stack(elems))
 
+def _collate_lane_graph(elems):
+    num_lanes = [elem.num_lanes for elem in elems]
+    bs = len(elems)
+    M = max(num_lanes)
+    lane_xyh = np.zeros([bs,M,*elems[0].lane_xyh.shape[-2:]])
+    lane_adj = np.zeros([bs,M,M],dtype=int)
+    lane_ids = list()
+    lane_mask = np.zeros([bs, M], dtype=int)
+    for i,elem in enumerate(elems):
+        lane_xyh[i,:num_lanes[i]] = elem.lane_xyh
+        lane_adj[i,:num_lanes[i],:num_lanes[i]] = elem.lane_adj
+        lane_ids.append(elem.lane_ids)
+        lane_mask[i,:num_lanes[i]] = 1
+
+    if elems[0].road_edge_xyzh is not None:
+        assert (
+            elems[0].road_edge_xyzh.shape[-1] == 4
+        ), "Road edge data must have 4 dimensions: x, y, z, heading. "
+        num_road_edges = [elem.road_edge_xyzh.shape[0] for elem in elems]
+        N = max(num_road_edges)
+        road_edge_xyzh = np.zeros([bs, N, *elems[0].road_edge_xyzh.shape[-2:]])
+        for i, elem in enumerate(elems):
+            road_edge_xyzh[i, : num_road_edges[i]] = elem.road_edge_xyzh
+    else:
+        road_edge_xyzh = None
+
+    return (
+        torch.as_tensor(lane_xyh),
+        torch.as_tensor(lane_adj),
+        torch.as_tensor(lane_mask),
+        lane_ids,
+        torch.as_tensor(road_edge_xyzh) if road_edge_xyzh is not None else None,
+    )
 
 def raster_map_collate_fn_agent(
     batch_elems: List[AgentBatchElement],
 ):
-    if batch_elems[0].map_patch is None:
-        return None, None, None, None
-
-    map_names = [batch_elem.map_name for batch_elem in batch_elems]
-
-    # Ensuring that any empty map patches have the correct number of channels
-    # prior to collation.
-    has_data: np.ndarray = np.array(
-        [batch_elem.map_patch.has_data for batch_elem in batch_elems],
-        dtype=bool,
-    )
-    no_data: np.ndarray = ~has_data
-
-    patch_channels: np.ndarray = np.array(
-        [batch_elem.map_patch.data.shape[0] for batch_elem in batch_elems],
-        dtype=int,
-    )
-
-    desired_num_channels: int
-    if np.any(has_data):
-        # If any of the batch elements' maps have data, then use
-        # their number of channels as the reference.
-        unique_num_channels = np.unique(patch_channels[has_data])
-    else:
-        # All map patches in this batch are from datasets with no maps.
-        unique_num_channels = np.unique(patch_channels)
-
-    if unique_num_channels.size > 1:
-        raise ValueError(
-            "Maps must all have the same number of channels in a batch, "
-            f"but found maps with {unique_num_channels.tolist()} channels."
-        )
-
-    desired_num_channels = unique_num_channels[0].item()
-
-    # Getting the map patch data and preparing it for batched rotation.
-    patch_size_y, patch_size_x = batch_elems[0].map_patch.data.shape[-2:]
-    patch_data: Tensor = torch.empty(
-        (len(batch_elems), desired_num_channels, patch_size_y, patch_size_x)
-    )
-
-    if np.any(has_data):
-        patch_data[has_data] = torch.as_tensor(
-            np.stack(
-                [
-                    batch_elem.map_patch.data
-                    for idx, batch_elem in enumerate(batch_elems)
-                    if has_data[idx]
-                ]
-            ),
-            dtype=torch.float,
-        )
-
-    if np.any(no_data):
-        patch_data[no_data] = torch.as_tensor(
-            np.stack(
-                [
-                    batch_elem.map_patch.data
-                    for idx, batch_elem in enumerate(batch_elems)
-                    if no_data[idx]
-                ]
-            ),
-            dtype=torch.float,
-        ).expand(-1, desired_num_channels, -1, -1)
-
-    patch_size: int = batch_elems[0].map_patch.crop_size
-    assert all(
-        batch_elem.map_patch.crop_size == patch_size for batch_elem in batch_elems
-    )
-
-    rot_angles: Tensor = torch.as_tensor(
-        [batch_elem.map_patch.rot_angle for batch_elem in batch_elems],
-        dtype=torch.float,
-    )
-    resolution: Tensor = torch.as_tensor(
-        [batch_elem.map_patch.resolution for batch_elem in batch_elems],
-        dtype=torch.float,
-    )
-    rasters_from_world_tf: Tensor = torch.as_tensor(
-        np.stack(
-            [batch_elem.map_patch.raster_from_world_tf for batch_elem in batch_elems]
-        ),
-        dtype=torch.float,
-    )
-
-    center_y: int = patch_size_y // 2
-    center_x: int = patch_size_x // 2
-    half_extent: int = patch_size // 2
-
-    if (
-        torch.count_nonzero(rot_angles) == 0
-        and patch_size == patch_data.shape[-1] == patch_data.shape[-2]
-    ):
-        rasters_from_world_tf = torch.bmm(
-            torch.tensor(
-                [
-                    [
-                        [1.0, 0.0, half_extent],
-                        [0.0, 1.0, half_extent],
-                        [0.0, 0.0, 1.0],
-                    ]
-                ],
-                dtype=rasters_from_world_tf.dtype,
-                device=rasters_from_world_tf.device,
-            ).expand((rasters_from_world_tf.shape[0], -1, -1)),
-            rasters_from_world_tf,
-        )
-
-        rot_crop_patches: Tensor = patch_data
-
-    else:
-        # Batch rotating patches by rot_angles.
-        rot_patches: Tensor = rotate(patch_data, torch.rad2deg(rot_angles))
-
-        # Center cropping via slicing.
-        rot_crop_patches: Tensor = rot_patches[
-            ...,
-            center_y - half_extent : center_y + half_extent,
-            center_x - half_extent : center_x + half_extent,
-        ]
-
-        rasters_from_world_tf = torch.bmm(
-            arr_utils.transform_matrices(
-                -rot_angles,
-                torch.tensor([[half_extent, half_extent]]).expand(
-                    (rot_angles.shape[0], -1)
-                ),
-            ),
-            rasters_from_world_tf,
-        )
-
-    return (
-        map_names,
-        rot_crop_patches,
-        resolution,
-        rasters_from_world_tf,
-    )
+    raise NotImplementedError()
 
 
 def raster_map_collate_fn_scene(
     batch_elems: List[SceneBatchElement],
     max_agent_num: Optional[int] = None,
     pad_value: Any = np.nan,
-) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
-    if batch_elems[0].map_patches is None:
-        return None, None, None, None
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
 
-    patch_size: int = batch_elems[0].map_patches[0].crop_size
-    assert all(
-        batch_elem.map_patches[0].crop_size == patch_size for batch_elem in batch_elems
-    )
-
-    map_names: List[str] = list()
-    num_agents: List[int] = list()
-    agents_rasters_from_world_tfs: List[np.ndarray] = list()
-    agents_patches: List[np.ndarray] = list()
-    agents_rot_angles_list: List[float] = list()
-    agents_res_list: List[float] = list()
-
-    for elem in batch_elems:
-        map_names.append(elem.map_name)
-        num_agents.append(min(elem.num_agents, max_agent_num))
-        agents_rasters_from_world_tfs += [
-            x.raster_from_world_tf for x in elem.map_patches[:max_agent_num]
-        ]
-        agents_patches += [x.data for x in elem.map_patches[:max_agent_num]]
-        agents_rot_angles_list += [
-            x.rot_angle for x in elem.map_patches[:max_agent_num]
-        ]
-        agents_res_list += [x.resolution for x in elem.map_patches[:max_agent_num]]
-
-    patch_data: Tensor = torch.as_tensor(np.stack(agents_patches), dtype=torch.float)
-    agents_rot_angles: Tensor = torch.as_tensor(
-        np.stack(agents_rot_angles_list), dtype=torch.float
-    )
-    agents_rasters_from_world_tf: Tensor = torch.as_tensor(
-        np.stack(agents_rasters_from_world_tfs), dtype=torch.float
-    )
-    agents_resolution: Tensor = torch.as_tensor(
-        np.stack(agents_res_list), dtype=torch.float
-    )
-
-    patch_size_y, patch_size_x = patch_data.shape[-2:]
-    center_y: int = patch_size_y // 2
-    center_x: int = patch_size_x // 2
-    half_extent: int = patch_size // 2
-
-    if torch.count_nonzero(agents_rot_angles) == 0:
-        agents_rasters_from_world_tf = torch.bmm(
-            torch.tensor(
-                [
-                    [
-                        [1.0, 0.0, half_extent],
-                        [0.0, 1.0, half_extent],
-                        [0.0, 0.0, 1.0],
-                    ]
-                ],
-                dtype=agents_rasters_from_world_tf.dtype,
-                device=agents_rasters_from_world_tf.device,
-            ).expand((agents_rasters_from_world_tf.shape[0], -1, -1)),
-            agents_rasters_from_world_tf,
-        )
-
-        rot_crop_patches = patch_data
-    else:
-        agents_rasters_from_world_tf = torch.bmm(
-            arr_utils.transform_matrices(
-                -agents_rot_angles,
-                torch.tensor([[half_extent, half_extent]]).expand(
-                    (agents_rot_angles.shape[0], -1)
-                ),
-            ),
-            agents_rasters_from_world_tf,
-        )
-
-        # Batch rotating patches by rot_angles.
-        rot_patches: Tensor = rotate(patch_data, torch.rad2deg(agents_rot_angles))
-
-        # Center cropping via slicing.
-        rot_crop_patches = rot_patches[
-            ...,
-            center_y - half_extent : center_y + half_extent,
-            center_x - half_extent : center_x + half_extent,
-        ]
-
-    rot_crop_patches = split_pad_crop(
-        rot_crop_patches, num_agents, pad_value=pad_value, desired_size=max_agent_num
-    )
-
-    agents_rasters_from_world_tf = split_pad_crop(
-        agents_rasters_from_world_tf,
-        num_agents,
-        pad_value=pad_value,
-        desired_size=max_agent_num,
-    )
-    agents_resolution = split_pad_crop(
-        agents_resolution, num_agents, pad_value=0, desired_size=max_agent_num
-    )
-
-    return map_names, rot_crop_patches, agents_resolution, agents_rasters_from_world_tf
+    raise NotImplementedError()
 
 
 def agent_collate_fn(
@@ -419,17 +220,21 @@ def agent_collate_fn(
                 to_add = max_neigh_history_len - padded_neighbor_histories.shape[-2]
                 padded_neighbor_histories = F.pad(
                     padded_neighbor_histories,
-                    pad=(0, 0, to_add, 0)
-                    if history_pad_dir == arr_utils.PadDirection.BEFORE
-                    else (0, 0, 0, to_add),
+                    pad=(
+                        (0, 0, to_add, 0)
+                        if history_pad_dir == arr_utils.PadDirection.BEFORE
+                        else (0, 0, 0, to_add)
+                    ),
                     mode="constant",
                     value=np.nan,
                 )
                 padded_neighbor_history_extents = F.pad(
                     padded_neighbor_history_extents,
-                    pad=(0, 0, to_add, 0)
-                    if history_pad_dir == arr_utils.PadDirection.BEFORE
-                    else (0, 0, 0, to_add),
+                    pad=(
+                        (0, 0, to_add, 0)
+                        if history_pad_dir == arr_utils.PadDirection.BEFORE
+                        else (0, 0, 0, to_add)
+                    ),
                     mode="constant",
                     value=np.nan,
                 )
@@ -547,9 +352,11 @@ def agent_collate_fn(
             to_add: int = hist_len - agent_history_t.shape[-2]
             agent_history_t = F.pad(
                 agent_history_t,
-                (0, 0, to_add, 0)
-                if history_pad_dir == arr_utils.PadDirection.BEFORE
-                else (0, 0, 0, to_add),
+                (
+                    (0, 0, to_add, 0)
+                    if history_pad_dir == arr_utils.PadDirection.BEFORE
+                    else (0, 0, 0, to_add)
+                ),
                 value=np.nan,
             ).as_subclass(AgentObsTensor)
 
@@ -557,9 +364,11 @@ def agent_collate_fn(
             to_add: int = hist_len - agent_history_extent_t.shape[-2]
             agent_history_extent_t = F.pad(
                 agent_history_extent_t,
-                (0, 0, to_add, 0)
-                if history_pad_dir == arr_utils.PadDirection.BEFORE
-                else (0, 0, 0, to_add),
+                (
+                    (0, 0, to_add, 0)
+                    if history_pad_dir == arr_utils.PadDirection.BEFORE
+                    else (0, 0, 0, to_add)
+                ),
                 value=np.nan,
             )
 
@@ -673,6 +482,18 @@ def agent_collate_fn(
     if batch_elems[0].vec_map is not None:
         vector_maps = [batch_elem.vec_map for batch_elem in batch_elems]
 
+    lane_xyh, lane_adj, lane_mask, lane_ids, road_edge_xyzh = (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    if hasattr(batch_elems[0],"lane_xyh") and batch_elems[0].lane_xyh is not None:
+        lane_xyh, lane_adj, lane_mask, lane_ids, road_edge_xyzh = _collate_lane_graph(
+            batch_elems
+        )
+
     agents_from_world_tf = torch.as_tensor(
         np.stack([batch_elem.agent_from_world_tf for batch_elem in batch_elems]),
         dtype=torch.float,
@@ -685,7 +506,7 @@ def agent_collate_fn(
         extras[key] = _collate_data(
             [batch_elem.extras[key] for batch_elem in batch_elems]
         )
-
+    track_ids = _collate_data([batch_elem.track_id for batch_elem in batch_elems]) if hasattr(batch_elems[0],"track_id") else None
     batch = AgentBatch(
         data_idx=data_index_t,
         scene_ts=scene_ts_t,
@@ -711,12 +532,18 @@ def agent_collate_fn(
         robot_fut_len=robot_future_len,
         map_names=map_names,
         maps=map_patches,
+        lane_xyh=lane_xyh,
+        lane_adj=lane_adj,
+        lane_mask=lane_mask,
+        lane_ids=lane_ids,
+        road_edge_xyzh=road_edge_xyzh,
         maps_resolution=maps_resolution,
         vector_maps=vector_maps,
         rasters_from_world_tf=rasters_from_world_tf,
         agents_from_world_tf=agents_from_world_tf,
         scene_ids=scene_ids,
         history_pad_dir=history_pad_dir,
+        track_ids=track_ids,
         extras=extras,
     )
 
@@ -780,6 +607,9 @@ def scene_collate_fn(
     return_dict: bool,
     pad_format: str,
     batch_augments: Optional[List[BatchAugmentation]] = None,
+    desired_num_agents = None,
+    desired_hist_len=None,
+    desired_fut_len=None,
 ) -> SceneBatch:
     batch_size: int = len(batch_elems)
     history_pad_dir: arr_utils.PadDirection = (
@@ -799,6 +629,8 @@ def scene_collate_fn(
     AgentObsTensor = TORCH_STATE_TYPES[obs_format]
 
     max_agent_num: int = max(elem.num_agents for elem in batch_elems)
+    if desired_num_agents is not None:
+        max_agent_num = max(max_agent_num,desired_num_agents)
 
     centered_agent_state: List[AgentStateTensor] = list()
     agents_types: List[Tensor] = list()
@@ -819,6 +651,10 @@ def scene_collate_fn(
 
     max_history_len: int = max(elem.agent_history_lens_np.max() for elem in batch_elems)
     max_future_len: int = max(elem.agent_future_lens_np.max() for elem in batch_elems)
+    if desired_hist_len is not None:
+        max_history_len = max(max_history_len,desired_hist_len)
+    if desired_fut_len is not None:
+        max_future_len = max(max_future_len,desired_fut_len)
 
     robot_future: List[AgentObsTensor] = list()
     robot_future_len: Tensor = torch.zeros((batch_size,), dtype=torch.long)
@@ -859,17 +695,21 @@ def scene_collate_fn(
             to_add = max_history_len - padded_agents_histories.shape[-2]
             padded_agents_histories = F.pad(
                 padded_agents_histories,
-                pad=(0, 0, to_add, 0)
-                if history_pad_dir == arr_utils.PadDirection.BEFORE
-                else (0, 0, 0, to_add),
+                pad=(
+                    (0, 0, to_add, 0)
+                    if history_pad_dir == arr_utils.PadDirection.BEFORE
+                    else (0, 0, 0, to_add)
+                ),
                 mode="constant",
                 value=np.nan,
             )
             padded_agents_history_extents = F.pad(
                 padded_agents_history_extents,
-                pad=(0, 0, to_add, 0)
-                if history_pad_dir == arr_utils.PadDirection.BEFORE
-                else (0, 0, 0, to_add),
+                pad=(
+                    (0, 0, to_add, 0)
+                    if history_pad_dir == arr_utils.PadDirection.BEFORE
+                    else (0, 0, 0, to_add)
+                ),
                 mode="constant",
                 value=np.nan,
             )
@@ -950,6 +790,18 @@ def scene_collate_fn(
     if batch_elems[0].vec_map is not None:
         vector_maps = [batch_elem.vec_map for batch_elem in batch_elems]
 
+    lane_xyh, lane_adj, lane_mask, lane_ids, road_edge_xyzh = (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    if hasattr(batch_elems[0],"lane_xyh") and batch_elems[0].lane_xyh is not None:
+        lane_xyh, lane_adj, lane_mask, lane_ids, road_edge_xyzh = _collate_lane_graph(
+            batch_elems
+        )
+
     centered_agent_from_world_tf = torch.as_tensor(
         np.stack(
             [batch_elem.centered_agent_from_world_tf for batch_elem in batch_elems]
@@ -989,6 +841,7 @@ def scene_collate_fn(
         agent_type=agents_types_t,
         centered_agent_state=centered_agent_state_t,
         agent_names=agent_names,
+        track_ids=None,
         agent_hist=agents_histories_t,
         agent_hist_extent=agents_history_extents_t,
         agent_hist_len=agents_history_len,
@@ -999,6 +852,11 @@ def scene_collate_fn(
         robot_fut_len=robot_future_len,
         map_names=map_names,
         maps=map_patches,
+        lane_xyh=lane_xyh,
+        lane_adj=lane_adj,
+        lane_mask=lane_mask,
+        lane_ids=lane_ids,
+        road_edge_xyzh=road_edge_xyzh,
         maps_resolution=maps_resolution,
         vector_maps=vector_maps,
         rasters_from_world_tf=rasters_from_world_tf,

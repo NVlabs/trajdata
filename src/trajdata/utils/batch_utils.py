@@ -1,8 +1,14 @@
 from collections import defaultdict
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+import torch
+
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
 from torch.utils.data import Sampler
+import torch
+import dill
 
 from trajdata import UnifiedDataset
 from trajdata.data_structures import (
@@ -10,10 +16,24 @@ from trajdata.data_structures import (
     AgentBatchElement,
     AgentDataIndex,
     AgentType,
+    SceneBatch,
     SceneBatchElement,
     SceneTimeAgent,
+    SceneBatch,
 )
-from trajdata.data_structures.collation import agent_collate_fn
+from trajdata.data_structures.collation import (
+    agent_collate_fn,
+    batch_rotate_raster_maps_for_agents_in_scene,
+)
+from trajdata.maps import RasterizedMapMetadata, RasterizedMapPatch, VectorMap
+from trajdata.utils.map_utils import load_map_patch
+from trajdata.utils.arr_utils import (
+    batch_nd_transform_xyvvaahh_pt,
+    batch_select,
+    PadDirection,
+)
+from trajdata.caching.df_cache import DataFrameCache
+from pathlib import Path
 
 
 class SceneTimeBatcher(Sampler):
@@ -173,3 +193,83 @@ def convert_to_agent_batch(
         )
 
     return agent_collate_fn(batch_elems, return_dict=False, pad_format=pad_format)
+
+
+def get_agents_map_patch(
+    cache_path: Path,
+    map_name: str,
+    patch_params: Dict[str, int],
+    agent_world_states_xyh: Union[np.ndarray, torch.Tensor],
+    allow_nan: float = False,
+    vector_map: Optional[VectorMap] = None,
+) -> List[RasterizedMapPatch]:
+
+    if isinstance(agent_world_states_xyh, torch.Tensor):
+        agent_world_states_xyh = agent_world_states_xyh.cpu().numpy()
+    assert agent_world_states_xyh.ndim == 2
+    assert agent_world_states_xyh.shape[-1] == 3
+    desired_patch_size: int = patch_params["map_size_px"]
+    resolution: float = patch_params["px_per_m"]
+    offset_xy: Tuple[float, float] = patch_params.get("offset_frac_xy", (0.0, 0.0))
+    return_rgb: bool = patch_params.get("return_rgb", True)
+    no_map_fill_val: float = patch_params.get("no_map_fill_value", 0.0)
+
+    if (
+        vector_map is not None
+        and getattr(vector_map, "raster_map_data", None) is not None
+    ):
+        # Use preloaded raster map data
+        raster_map_or_path = vector_map.raster_map_data
+        raster_metadata_or_path = vector_map.raster_map_metadata
+    else:
+        env_name, location_name = map_name.split(
+            ":"
+        )  # assumes map_name format nusc_mini:boston-seaports
+        (
+            maps_path,
+            _,
+            _,
+            raster_map_or_path,
+            raster_metadata_or_path,
+        ) = DataFrameCache.get_map_paths(
+            cache_path, env_name, location_name, resolution
+        )
+
+    map_patches = list()
+    for i in range(agent_world_states_xyh.shape[0]):
+        patch_data, raster_from_world_tf, has_data = load_map_patch(
+            raster_map_or_path,
+            raster_metadata_or_path,
+            agent_world_states_xyh[i, 0],
+            agent_world_states_xyh[i, 1],
+            desired_patch_size,
+            resolution,
+            offset_xy,
+            agent_world_states_xyh[i, 2],
+            return_rgb,
+            rot_pad_factor=np.sqrt(2),
+            no_map_val=no_map_fill_val,
+        )
+        map_patches.append(
+            RasterizedMapPatch(
+                data=patch_data,
+                rot_angle=agent_world_states_xyh[i, 2],
+                crop_size=desired_patch_size,
+                resolution=resolution,
+                raster_from_world_tf=raster_from_world_tf,
+                has_data=has_data,
+            )
+        )
+
+    return map_patches
+
+
+def load_raster_map_data(
+    cache_path: Path, map_name: str, patch_params: Dict[str, int]
+):
+    raise NotImplementedError()
+
+def get_raster_maps_for_scene_batch(
+    batch: SceneBatch, cache_path: Path, raster_map_params: Dict, ego_only: bool = False
+):
+    raise NotImplementedError()

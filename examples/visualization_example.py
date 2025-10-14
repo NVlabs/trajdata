@@ -1,13 +1,10 @@
 from collections import defaultdict
 
+import panel as pn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
 from trajdata import AgentBatch, AgentType, UnifiedDataset
-from trajdata.visualization.interactive_animation import (
-    InteractiveAnimation,
-    animate_agent_batch_interactive,
-)
+from trajdata.visualization.interactive_animation import animate_agent_batch_interactive
 from trajdata.visualization.interactive_vis import plot_agent_batch_interactive
 from trajdata.visualization.vis import plot_agent_batch
 
@@ -51,17 +48,17 @@ def main():
 
     batch: AgentBatch
     for batch in tqdm(dataloader):
-        plot_agent_batch_interactive(batch, batch_idx=0, cache_path=dataset.cache_path)
-        plot_agent_batch(batch, batch_idx=0)
+        # plot_agent_batch_interactive(batch, batch_idx=0, cache_path=dataset.cache_path)
+        # plot_agent_batch(batch, batch_idx=0)
 
-        animation = InteractiveAnimation(
-            animate_agent_batch_interactive,
-            batch=batch,
-            batch_idx=0,
-            cache_path=dataset.cache_path,
+        server = pn.serve(
+            animate_agent_batch_interactive(
+                batch=batch, batch_idx=0, cache_path=dataset.cache_path
+            ),
         )
-        animation.show()
-        # break
+        server.io_loop.start()
+
+        break
 
 
 if __name__ == "__main__":

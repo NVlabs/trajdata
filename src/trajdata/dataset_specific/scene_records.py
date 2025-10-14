@@ -1,11 +1,6 @@
 from typing import NamedTuple
 
 
-class Argoverse2Record(NamedTuple):
-    name: str
-    data_idx: int
-
-
 class EUPedsRecord(NamedTuple):
     name: str
     location: str
@@ -27,15 +22,6 @@ class InteractionRecord(NamedTuple):
 
 
 class NuscSceneRecord(NamedTuple):
-    name: str
-    location: str
-    length: str
-    desc: str
-    data_idx: int
-
-
-class VODSceneRecord(NamedTuple):
-    token: str
     name: str
     location: str
     length: str

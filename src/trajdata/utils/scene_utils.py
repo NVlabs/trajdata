@@ -60,12 +60,13 @@ def interpolate_scene_dt(scene: Scene, desired_dt: float) -> None:
 
 def subsample_scene_dt(scene: Scene, desired_dt: float) -> None:
     dt_ratio: float = desired_dt / scene.dt
-    if not dt_ratio.is_integer():
+
+    if not is_integer_robust(dt_ratio):
         raise ValueError(
             f"Cannot subsample scene: {desired_dt} is not integer divisible by {scene.dt} for {str(scene)}"
         )
 
-    dt_factor: int = int(dt_ratio)
+    dt_factor: int = int(round(dt_ratio))
 
     # E.g., the scene is currently at dt = 0.1s (10 Hz),
     # but we want desired_dt = 0.5s (2 Hz).
@@ -86,3 +87,6 @@ def subsample_scene_dt(scene: Scene, desired_dt: float) -> None:
     scene.dt = desired_dt
     # Note we do not touch scene_info.env_metadata.dt, this will serve as our
     # source of the "original" data dt information.
+
+def is_integer_robust(x):
+    return abs(x-round(x))<1e-6

@@ -76,6 +76,15 @@ def y_component(long, lat, c, s):
     return long * s + lat * c
 
 
+def _check_format_length_compatible_with_array_dim(array, format):
+    if array.shape[-1] != len(format.split(",")):
+        raise ValueError(
+            f"Array shape {array.shape} incompatible with format {format}: "
+            f"Array has {array.shape[-1]} entries but format has length "
+            f"{len(format.split(','))}."
+        )
+
+
 class State:
     """
     Base class implementing property access to state elements
@@ -168,6 +177,23 @@ class State:
             return self.from_array(result, new_format)
         else:
             return result
+        
+    def has_attr(self, attr: str) -> bool:
+        try:
+            # Check whether we can compute attr without raising ValueError.
+            getattr(self, attr)
+            return True
+        except ValueError:
+            return False
+
+
+    def has_attr(self, attr: str) -> bool:
+        try:
+            # Check whether we can compute attr without raising ValueError.
+            getattr(self, attr)
+            return True
+        except ValueError:
+            return False
 
     def _compute_attr(self, attr: str, _depth: int = MAX_RECURSION_LEVELS):
         """
@@ -320,6 +346,7 @@ class StateArray(State, np.ndarray):
 
     @classmethod
     def from_array(cls, array: Array, format: str):
+        _check_format_length_compatible_with_array_dim(array, format)
         return array.view(NP_STATE_TYPES[format])
 
     @classmethod
@@ -393,10 +420,21 @@ class StateTensor(State, Tensor):
                 elif indices == slice(None):
                     new_class = cls
             elif isinstance(indices, tuple):
-                if len(indices) < self.ndim:
+                if len(indices) < self.ndim and Ellipsis not in indices:
                     new_class = cls
                 elif len(indices) == self.ndim and indices[-1] == slice(None):
                     new_class = cls
+
+        if func in (torch.reshape, Tensor.reshape):
+            original_state_size = args[0].shape[-1]
+            if len(args) > 1:
+                # shape passed in as positional argument
+                # It can be either a separate tuple or a series of ints
+                shape = args[1] if isinstance(args[1], tuple) else args[1:]
+            else:
+                shape = kwargs.get("shape")
+            if shape[-1] == original_state_size:
+                new_class = cls
 
         if isinstance(result, Tensor) and new_class != cls:
             result = result.as_subclass(new_class)
@@ -426,6 +464,7 @@ class StateTensor(State, Tensor):
 
     @classmethod
     def from_array(cls, array: Array, format: str):
+        _check_format_length_compatible_with_array_dim(array, format)
         return array.as_subclass(TORCH_STATE_TYPES[format])
 
     @classmethod

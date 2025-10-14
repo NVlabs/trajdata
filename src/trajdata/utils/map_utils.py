@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING
+import warnings
 
 if TYPE_CHECKING:
-    from trajdata.maps import map_kdtree, vec_map, map_strtree
+    from trajdata.maps import (
+        map_kdtree,
+        vec_map,
+        map_strtree
+    )
     from trajdata.maps.vec_map_elements import MapElementType
 
 from pathlib import Path
-from typing import Dict, Final, Optional
-
+from typing import Dict, Final, Optional, List, NamedTuple
+import enum
 import dill
 import numpy as np
 from scipy.stats import circmean
@@ -17,7 +21,28 @@ from scipy.stats import circmean
 import trajdata.proto.vectorized_map_pb2 as map_proto
 from trajdata.utils import arr_utils
 
-MM_PER_M: Final[float] = 1000
+NUM_DECIMALS: Final[int] = 5
+COMPRESSION_SCALE: Final[float] = 10**NUM_DECIMALS
+
+
+class LaneSegRelation(enum.IntEnum):
+    """
+    Categorical token describing the relationship between an agent and a Lane
+    """
+
+    NOTCONNECTED = 0
+    NEXT = 1
+    PREV = 2
+    LEFT = 3
+    RIGHT = 4
+
+
+class LaneGraph(NamedTuple):
+    lane_ids: List[str]
+    lane_centerlines: np.ndarray
+    lane_left_edges: np.ndarray
+    lane_right_edges: np.ndarray
+    lane_connectivity: np.ndarray
 
 
 def decompress_values(data: np.ndarray) -> np.ndarray:
@@ -25,11 +50,11 @@ def decompress_values(data: np.ndarray) -> np.ndarray:
     # The delta for the first point is just its coordinates tuple, i.e. it is a "delta" from
     # the origin. For subsequent points, this field stores the difference between the point's
     # coordinates and the previous point's coordinates. This is for representation efficiency.
-    return np.cumsum(data, axis=0, dtype=float) / MM_PER_M
+    return np.cumsum(data, axis=0, dtype=float) / COMPRESSION_SCALE
 
 
 def compress_values(data: np.ndarray) -> np.ndarray:
-    return (np.diff(data, axis=0, prepend=0.0) * MM_PER_M).astype(np.int32)
+    return (np.diff(data, axis=0, prepend=0.0) * COMPRESSION_SCALE).astype(np.int64)
 
 
 def get_polyline_headings(points: np.ndarray) -> np.ndarray:
@@ -109,6 +134,30 @@ def populate_lane_polylines(
         new_lane_proto.right_boundary.dx_mm.extend(compressed_right_pts[:, 0].tolist())
         new_lane_proto.right_boundary.dy_mm.extend(compressed_right_pts[:, 1].tolist())
         new_lane_proto.right_boundary.dz_mm.extend(compressed_right_pts[:, 2].tolist())
+    if road_lane_py.traffic_sign_ids is not None:
+        new_lane_proto.traffic_sign_ids.extend([iden.encode() for iden in road_lane_py.traffic_sign_ids])
+    if road_lane_py.wait_line_ids is not None:
+        new_lane_proto.wait_line_ids.extend([iden.encode() for iden in road_lane_py.wait_line_ids])
+
+
+def populate_road_edge_polylines(
+    new_road_edge_proto: map_proto.RoadEdge,
+    road_edge_py: vec_map.RoadEdge,
+    origin: np.ndarray,
+) -> None:
+    """Fill a Lane object's polyline attributes.
+    All points should be in world coordinates.
+
+    Args:
+        new_road_edge_proto (RoadEdge): _description_
+        road_edge_py (np.ndarray): _description_
+        origin (np.ndarray): _description_
+    """
+    compressed_pts: np.ndarray = compress_values(road_edge_py.polyline.xyz - origin)
+    new_road_edge_proto.polyline.dx_mm.extend(compressed_pts[:, 0].tolist())
+    new_road_edge_proto.polyline.dy_mm.extend(compressed_pts[:, 1].tolist())
+    new_road_edge_proto.polyline.dz_mm.extend(compressed_pts[:, 2].tolist())
+    new_road_edge_proto.polyline.h_rad.extend(road_edge_py.polyline.h.tolist())
 
 
 def populate_polygon(
@@ -288,6 +337,119 @@ def load_kdtrees(
         kdtrees: Dict[MapElementType, map_kdtree.MapElementKDTree] = dill.load(f)
 
     return kdtrees
+
+
+def obtain_lane_graph(scene, map_api, vector_map_params) -> LaneGraph:
+    map_name = f"{scene.env_name}:{scene.location}"
+    num_pts = vector_map_params.get("num_lane_pts", 30)
+    vec_map = map_api.get_map(
+        map_name,
+        None,
+        **vector_map_params,
+    )
+    infer_lane_connectivity = vector_map_params.get("infer_lane_connectivity", False)
+    lane_ids = [lane.id for lane in vec_map.lanes]
+    lane_centerlines = np.stack(
+        [
+            lane.center.interpolate(num_pts).points[:, [0, 1, 3]]
+            for lane in vec_map.lanes
+        ],
+        0,
+    )
+    lane_left_edges = np.stack(
+        [
+            (
+                lane.left_edge.interpolate(num_pts).points[:, :2]
+                if lane.left_edge is not None
+                else np.full(
+                    [num_pts, 2], dtype=lane_centerlines.dtype, fill_value=np.nan
+                )
+            )
+            for lane in vec_map.lanes
+        ],
+        0,
+    )
+    lane_right_edges = np.stack(
+        [
+            (
+                lane.right_edge.interpolate(num_pts).points[:, :2]
+                if lane.right_edge is not None
+                else np.full(
+                    [num_pts, 2], dtype=lane_centerlines.dtype, fill_value=np.nan
+                )
+            )
+            for lane in vec_map.lanes
+        ],
+        0,
+    )
+    # Lane connectivity
+    rough_dis_map = lane_centerlines.mean()
+    lane_adj = np.zeros((len(lane_ids), len(lane_ids)), dtype=np.int8)
+
+    for i, lane in enumerate(vec_map.lanes):
+        try:
+            for adj_lane_id in lane.next_lanes:
+                lane_adj[i, lane_ids.index(adj_lane_id)] = LaneSegRelation.NEXT.value
+
+            for adj_lane_id in lane.prev_lanes:
+                lane_adj[i, lane_ids.index(adj_lane_id)] = LaneSegRelation.PREV.value
+
+            for adj_lane_id in lane.adj_lanes_left:
+                lane_adj[i, lane_ids.index(adj_lane_id)] = LaneSegRelation.LEFT.value
+
+            for adj_lane_id in lane.adj_lanes_right:
+                lane_adj[i, lane_ids.index(adj_lane_id)] = LaneSegRelation.RIGHT.value
+        except:
+            pass
+    if infer_lane_connectivity:
+        LAT_THRESHOLD = 4.5
+        H_THRESHOLD = 0.1
+        PTS_THRESHOLD = 3
+        lane_center_pt = lane_centerlines[:, :, :2].mean(1)
+        rough_dis_map = np.linalg.norm(
+            lane_center_pt[:, None] - lane_center_pt[None], axis=-1
+        )
+        topk = 10
+        topk_idx = np.argsort(rough_dis_map, axis=1)[:, 1 : topk + 1]
+        infered_lane_adj = np.zeros((len(lane_ids), len(lane_ids)), dtype=np.int8)
+        for i, lane in enumerate(vec_map.lanes):
+            centerline = lane_centerlines[i]
+            relevant_lanes = lane_centerlines[topk_idx[i]]
+            dx, dy, dh = arr_utils.batch_proj(
+                centerline.repeat(topk, 0), np.tile(relevant_lanes, (num_pts, 1, 1))
+            )
+            min_idx = np.argmin(np.abs(dx), axis=1)
+            min_dx = np.take_along_axis(dx, min_idx[:, None], axis=1).reshape(
+                num_pts, topk
+            )
+            min_dy = np.take_along_axis(dy, min_idx[:, None], axis=1).reshape(
+                num_pts, topk
+            )
+            dh = dh.reshape(num_pts, topk)
+            dx = dx.reshape(num_pts, topk, num_pts)
+
+            # if one of the waypoints has a negative and positive dx, then it is contained in between the start and end of the adjacent lane
+            longi_adj = np.logical_and(dx.min(2) < 0, dx.max(2) > 0)
+
+            lat_left_adj = np.logical_and(min_dy > 0, min_dy < LAT_THRESHOLD)
+            lat_right_adj = np.logical_and(min_dy < 0, min_dy > -LAT_THRESHOLD)
+            heading_adj = np.abs(dh) < H_THRESHOLD
+
+            left_adj_flag = (longi_adj * lat_left_adj * heading_adj).sum(
+                0
+            ) > PTS_THRESHOLD
+            right_adj_flag = (longi_adj * lat_right_adj * heading_adj).sum(
+                0
+            ) > PTS_THRESHOLD
+            infered_lane_adj[i, topk_idx[i][left_adj_flag]] = LaneSegRelation.LEFT.value
+            infered_lane_adj[i, topk_idx[i][right_adj_flag]] = (
+                LaneSegRelation.RIGHT.value
+            )
+
+        lane_adj = lane_adj + (lane_adj == 0) * infered_lane_adj
+    return LaneGraph(
+        lane_ids, lane_centerlines, lane_left_edges, lane_right_edges, lane_adj
+    )
 
 
 def load_rtrees(

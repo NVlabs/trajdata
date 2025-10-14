@@ -279,7 +279,11 @@ class NuscDataset(RawDataset):
         )
 
         vector_map = VectorMap(map_id=f"{self.name}:{map_name}")
-        nusc_utils.populate_vector_map(vector_map, nusc_map)
+        nusc_utils.populate_vector_map(
+            vector_map,
+            nusc_map,
+            max_lane_length=map_params.get("max_lane_length", None),
+        )
 
         map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)
 

@@ -17,8 +17,8 @@ from trajdata.utils import vis_utils
 class InteractiveFigure:
     def __init__(self, **kwargs) -> None:
         self.aspect_ratio: float = kwargs.get("aspect_ratio", 16 / 9)
-        self.width: int = kwargs.get("width", 1280)
-        self.height: int = kwargs.get("height", int(self.width / self.aspect_ratio))
+        self.width: int = kwargs.pop("width", 1280)
+        self.height: int = kwargs.pop("height", int(self.width / self.aspect_ratio))
 
         # We'll be tracking the maxes and mins of data with these.
         self.x_min = np.inf

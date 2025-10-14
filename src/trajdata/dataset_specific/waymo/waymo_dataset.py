@@ -8,8 +8,6 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import tqdm
-from waymo_open_dataset.protos.scenario_pb2 import Scenario
-
 from trajdata.caching import EnvCache, SceneCache
 from trajdata.data_structures import (
     AgentMetadata,
@@ -43,6 +41,7 @@ from trajdata.proto.vectorized_map_pb2 import (
 )
 from trajdata.utils import arr_utils
 from trajdata.utils.parallel_utils import parallel_apply
+from waymo_open_dataset.protos.scenario_pb2 import Scenario
 
 
 def const_lambda(const_val: Any) -> Any:
@@ -178,7 +177,7 @@ class WaymoDataset(RawDataset):
         )
         scenario: Scenario = Scenario()
         for data in dataset:
-            scenario.ParseFromString(bytearray(data.numpy()))
+            scenario.ParseFromString(bytes(data.numpy()))
             break
 
         agent_ids = []
@@ -186,6 +185,7 @@ class WaymoDataset(RawDataset):
         all_agent_data = []
         agents_to_remove = []
         ego_id = None
+        agent_info_dict: dict[str, AgentMetadata] = {}
         for index, track in enumerate(scenario.tracks):
             agent_type: AgentType = translate_agent_type(track.object_type)
             if agent_type == -1:
@@ -238,19 +238,16 @@ class WaymoDataset(RawDataset):
                 ego_id = agent_id
                 agent_name = "ego"
 
-            agent_info = AgentMetadata(
-                name=agent_name,
-                agent_type=agent_type,
-                first_timestep=first_timestep,
-                last_timestep=last_timestep,
-                extent=VariableExtent(),
-            )
-            if last_timestep - first_timestep > 0:
-                agent_list.append(agent_info)
-                for timestep in range(first_timestep, last_timestep + 1):
-                    agent_presence[timestep].append(agent_info)
-            else:
+            if last_timestep - first_timestep <= 0:
                 agents_to_remove.append(agent_id)
+            else:
+                agent_info_dict[agent_name] = AgentMetadata(
+                    name=agent_name,
+                    agent_type=agent_type,
+                    first_timestep=first_timestep,
+                    last_timestep=last_timestep,
+                    extent=VariableExtent(),
+                )
 
         # agent_ml_class = np.repeat(agent_ml_class, scene.length_timesteps)
         # all_agent_data = np.insert(all_agent_data, 6, agent_ml_class, axis=1)
@@ -307,6 +304,22 @@ class WaymoDataset(RawDataset):
             index={str(ego_id): "ego"}, inplace=True, level="agent_id"
         )
 
+        all_agent_data_df = waymo_utils.sort_df_by_distance_to_ego_vehicle(
+            all_agent_data_df,
+            timestep=0,
+            ego_name="ego",
+        )
+
+        # Get sorted (by distance) list of agent_ids
+        agent_ids = all_agent_data_df.index.get_level_values("agent_id").unique()
+        for agent_id in agent_ids:
+            agent_info = agent_info_dict[str(agent_id)]
+            agent_list.append(agent_info)
+            for timestep in range(
+                agent_info.first_timestep, agent_info.last_timestep + 1
+            ):
+                agent_presence[timestep].append(agent_info)
+
         cache_class.save_agent_data(
             all_agent_data_df.loc[:, final_cols],
             cache_path,
@@ -340,12 +353,13 @@ class WaymoDataset(RawDataset):
 
         scenario: Scenario = Scenario()
         for data in dataset:
-            scenario.ParseFromString(bytearray(data.numpy()))
+            scenario.ParseFromString(bytes(data.numpy()))
             break
 
         vector_map: VectorMap = waymo_utils.extract_vectorized(
             map_features=scenario.map_features,
             map_name=f"{self.name}:{self.name}_{data_idx}",
+            max_lane_length=map_params.get("max_lane_length", 100),
         )
 
         map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)

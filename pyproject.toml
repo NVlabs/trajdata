@@ -12,8 +12,8 @@ classifiers = [
     "Programming Language :: Python :: 3.8",
     "License :: OSI Approved :: Apache Software License",
 ]
-name = "trajdata"
-version = "1.4.0"
+name = "trajdata-alpasim"
+version = "1.4.2"
 authors = [{ name = "Boris Ivanovic", email = "bivanovic@nvidia.com" }]
 description = "A unified interface to many trajectory forecasting datasets."
 readme = "README.md"
@@ -26,25 +26,20 @@ dependencies = [
     "pandas>=1.4.1",
     "pyarrow>=7.0.0",
     "torch>=1.10.2",
-    "zarr>=2.11.0",
-    "kornia>=0.6.4",
     "seaborn>=0.12",
     "bokeh>=3.0.3",
     "geopandas>=0.13.2",
-    "protobuf==3.19.4",
+    "protobuf>=4.0.0,<5.0.0",
     "scipy>=1.9.0",
-    "opencv-python>=4.5.0",
     "shapely>=2.0.0",
 ]
 
 [project.optional-dependencies]
-av2 = ["av2==0.2.1"]
-dev = ["black", "isort", "pytest", "pytest-xdist", "twine", "build"]
+dev = ["black", "isort", "pytest", "pytest-xdist", "twine", "build", "grpcio-tools==1.62.2"]
 interaction = ["lanelet2==1.2.1"]
 lyft = ["l5kit==1.5.0"]
 nusc = ["nuscenes-devkit==1.1.9"]
 waymo = ["tensorflow==2.11.0", "waymo-open-dataset-tf-2-11-0", "intervaltree"]
-vod = ["vod-devkit==1.1.1"]
 
 [project.urls]
 "Homepage" = "https://github.com/nvr-avg/trajdata"

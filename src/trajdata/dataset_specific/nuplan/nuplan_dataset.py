@@ -360,38 +360,6 @@ class NuplanDataset(RawDataset):
 
         return agent_list, agent_presence
 
-    def cache_map(
-        self,
-        map_name: str,
-        cache_path: Path,
-        map_cache_class: Type[SceneCache],
-        map_params: Dict[str, Any],
-    ) -> None:
-        nuplan_map: NuPlanMap = map_factory.get_maps_api(
-            map_root=str(self.metadata.data_dir.parent / "maps"),
-            map_version=nuplan_utils.NUPLAN_MAP_VERSION,
-            map_name=nuplan_utils.NUPLAN_FULL_MAP_NAME_DICT[map_name],
-        )
-
-        # Loading all layer geometries.
-        nuplan_map.initialize_all_layers()
-
-        # This df has the normal lane_connectors with additional boundary information,
-        # which we want to use, however the default index is not the lane_connector_fid,
-        # although it is a 1:1 mapping so we instead create another index with the
-        # lane_connector_fids as the key and the resulting integer indices as the value.
-        lane_connector_fids: pd.Series = nuplan_map._vector_map[
-            "gen_lane_connectors_scaled_width_polygons"
-        ]["lane_connector_fid"]
-        lane_connector_idxs: pd.Series = pd.Series(
-            index=lane_connector_fids, data=range(len(lane_connector_fids))
-        )
-
-        vector_map = VectorMap(map_id=f"{self.name}:{map_name}")
-        nuplan_utils.populate_vector_map(vector_map, nuplan_map, lane_connector_idxs)
-
-        map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)
-
     def cache_maps(
         self,
         cache_path: Path,
@@ -406,4 +374,50 @@ class NuplanDataset(RawDataset):
             desc=f"Caching {self.name} Maps at {map_params['px_per_m']:.2f} px/m",
             position=0,
         ):
-            self.cache_map(map_name, cache_path, map_cache_class, map_params)
+            cache_map(
+                map_root=str(self.metadata.data_dir.parent / "maps"),
+                env_name=self.name,
+                map_name=map_name,
+                cache_path=cache_path,
+                map_cache_class=map_cache_class,
+                map_params=map_params,
+            )
+
+
+def cache_map(
+    map_root: str,
+    env_name: str,
+    map_name: str,
+    cache_path: Path,
+    map_cache_class: Type[SceneCache],
+    map_params: Dict[str, Any],
+) -> None:
+    nuplan_map: NuPlanMap = map_factory.get_maps_api(
+        map_root=map_root,
+        map_version=nuplan_utils.NUPLAN_MAP_VERSION,
+        map_name=nuplan_utils.NUPLAN_FULL_MAP_NAME_DICT[map_name],
+    )
+
+    # Loading all layer geometries.
+    nuplan_map.initialize_all_layers()
+
+    # This df has the normal lane_connectors with additional boundary information,
+    # which we want to use, however the default index is not the lane_connector_fid,
+    # although it is a 1:1 mapping so we instead create another index with the
+    # lane_connector_fids as the key and the resulting integer indices as the value.
+    lane_connector_fids: pd.Series = nuplan_map._vector_map[
+        "gen_lane_connectors_scaled_width_polygons"
+    ]["lane_connector_fid"]
+    lane_connector_idxs: pd.Series = pd.Series(
+        index=lane_connector_fids, data=range(len(lane_connector_fids))
+    )
+
+    vector_map = VectorMap(map_id=f"{env_name}:{map_name}")
+    nuplan_utils.populate_vector_map(
+        vector_map,
+        nuplan_map,
+        lane_connector_idxs,
+        max_lane_length=map_params.get("max_lane_length", None),
+    )
+
+    map_cache_class.finalize_and_cache_map(cache_path, vector_map, map_params)

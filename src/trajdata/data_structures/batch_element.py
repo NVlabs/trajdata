@@ -3,13 +3,21 @@ from math import sqrt
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-
 from trajdata.caching import SceneCache
 from trajdata.data_structures.agent import AgentMetadata, AgentType
 from trajdata.data_structures.scene import SceneTime, SceneTimeAgent
 from trajdata.data_structures.state import StateArray
 from trajdata.maps import MapAPI, RasterizedMapPatch, VectorMap
+from trajdata.utils.arr_utils import (
+    get_close_lanes,
+    get_close_road_edges,
+    transform_xyh_np,
+)
+from trajdata.utils.map_utils import LaneSegRelation
 from trajdata.utils.state_utils import convert_to_frame_state, transform_from_frame
+from trajdata.utils.arr_utils import transform_xyh_np, get_close_lanes
+
+from trajdata.utils.map_utils import LaneSegRelation
 
 
 class AgentBatchElement:
@@ -35,6 +43,7 @@ class AgentBatchElement:
         standardize_data: bool = False,
         standardize_derivatives: bool = False,
         max_neighbor_num: Optional[int] = None,
+        lane_graph_cache: Optional[dict] = None,
     ) -> None:
         self.cache: SceneCache = cache
         self.data_index: int = data_index
@@ -54,6 +63,8 @@ class AgentBatchElement:
         else:
             self.curr_agent_state_np = raw_state
 
+        incl_z = self.curr_agent_state_np.has_attr("position3d")
+
         self.standardize_data = standardize_data
         if self.standardize_data:
             # Request cache to return observations relative to current agent
@@ -68,16 +79,26 @@ class AgentBatchElement:
             agent_pos = self.curr_agent_state_np.position
             agent_heading_vector = self.curr_agent_state_np.heading_vector
             cos_agent, sin_agent = agent_heading_vector[0], agent_heading_vector[1]
-            world_from_agent_tf: np.ndarray = np.array(
-                [
-                    [cos_agent, -sin_agent, agent_pos[0]],
-                    [sin_agent, cos_agent, agent_pos[1]],
-                    [0.0, 0.0, 1.0],
-                ]
-            )
+            if incl_z:
+                world_from_agent_tf: np.ndarray = np.array(
+                    [
+                        [cos_agent, -sin_agent, 0.0, agent_pos[0]],
+                        [sin_agent, cos_agent, 0.0, agent_pos[1]],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                )
+            else:
+                world_from_agent_tf: np.ndarray = np.array(
+                    [
+                        [cos_agent, -sin_agent, agent_pos[0]],
+                        [sin_agent, cos_agent, agent_pos[1]],
+                        [0.0, 0.0, 1.0],
+                    ]
+                )
             self.agent_from_world_tf: np.ndarray = np.linalg.inv(world_from_agent_tf)
         else:
-            self.agent_from_world_tf: np.ndarray = np.eye(3)
+            self.agent_from_world_tf: np.ndarray = np.eye(4 if incl_z else 3)
 
         ### AGENT-SPECIFIC DATA ###
         self.agent_history_np, self.agent_history_extent_np = self.get_agent_history(
@@ -149,15 +170,55 @@ class AgentBatchElement:
         if map_api is not None:
             self.vec_map = map_api.get_map(
                 map_name,
-                self.cache
-                if self.cache.is_traffic_light_data_cached(
-                    # Is the original dt cached? If so, we can continue by
-                    # interpolating time to get whatever the user desires.
-                    self.cache.scene.env_metadata.dt
-                )
-                else None,
+                (
+                    self.cache
+                    if self.cache.is_traffic_light_data_cached(
+                        # Is the original dt cached? If so, we can continue by
+                        # interpolating time to get whatever the user desires.
+                        self.cache.scene.env_metadata.dt
+                    )
+                    else None
+                ),
                 **vector_map_params if vector_map_params is not None else None,
             )
+            if vector_map_params.get("calc_lane_graph", False):
+                # not tested
+                ego_xyh = np.concatenate(
+                    [
+                        self.curr_agent_state_np.position,
+                        self.curr_agent_state_np.heading,
+                    ]
+                )
+                num_pts = vector_map_params.get("num_lane_pts", 30)
+                max_num_lanes = vector_map_params.get("max_num_lanes", 20)
+                remove_single_successor = vector_map_params.get(
+                    "remove_single_successor", False
+                )
+                radius = vector_map_params.get("radius", 100)
+                (
+                    self.num_lanes,
+                    self.lane_xyh,
+                    self.lane_adj,
+                    self.lane_ids,
+                    self.road_edge_xyzh,
+                ) = gen_lane_graph(
+                    self.vec_map,
+                    ego_xyh,
+                    self.agent_from_world_tf,
+                    num_pts,
+                    max_num_lanes,
+                    radius,
+                    remove_single_successor=remove_single_successor,
+                    get_road_edges=vector_map_params.get("incl_road_edges", False),
+                    lane_graph_cache=lane_graph_cache,
+                )
+
+            else:
+                self.lane_xyh = None
+                self.lane_adj = None
+                self.lane_ids = list()
+                self.num_lanes = 0
+                self.road_edge_xyzh = None
 
         self.scene_id = scene_time_agent.scene.name
 
@@ -271,47 +332,7 @@ class AgentBatchElement:
         return robot_curr_and_fut_np
 
     def get_agent_map_patch(self, patch_params: Dict[str, int]) -> RasterizedMapPatch:
-        world_x, world_y = self.curr_agent_state_np.position
-        desired_patch_size: int = patch_params["map_size_px"]
-        resolution: float = patch_params["px_per_m"]
-        offset_xy: Tuple[float, float] = patch_params.get("offset_frac_xy", (0.0, 0.0))
-        return_rgb: bool = patch_params.get("return_rgb", True)
-        no_map_fill_val: float = patch_params.get("no_map_fill_value", 0.0)
-
-        if self.standardize_data:
-            heading = self.curr_agent_state_np.heading[0]
-            patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
-                world_x,
-                world_y,
-                desired_patch_size,
-                resolution,
-                offset_xy,
-                heading,
-                return_rgb,
-                rot_pad_factor=sqrt(2),
-                no_map_val=no_map_fill_val,
-            )
-        else:
-            heading = 0.0
-            patch_data, raster_from_world_tf, has_data = self.cache.load_map_patch(
-                world_x,
-                world_y,
-                desired_patch_size,
-                resolution,
-                offset_xy,
-                heading,
-                return_rgb,
-                no_map_val=no_map_fill_val,
-            )
-
-        return RasterizedMapPatch(
-            data=patch_data,
-            rot_angle=heading,
-            crop_size=desired_patch_size,
-            resolution=resolution,
-            raster_from_world_tf=raster_from_world_tf,
-            has_data=has_data,
-        )
+        raise NotImplementedError()
 
 
 class SceneBatchElement:
@@ -336,6 +357,7 @@ class SceneBatchElement:
         standardize_data: bool = False,
         standardize_derivatives: bool = False,
         max_agent_num: Optional[int] = None,
+        lane_graph_cache: Optional[dict] = None,
     ) -> None:
         self.cache: SceneCache = cache
         self.data_index = data_index
@@ -362,6 +384,8 @@ class SceneBatchElement:
         else:
             self.centered_agent_state_np = raw_state
 
+        incl_z = self.centered_agent_state_np.has_attr("position3d")
+
         self.standardize_data = standardize_data
 
         if self.standardize_data:
@@ -378,19 +402,30 @@ class SceneBatchElement:
             agent_heading: float = self.centered_agent_state_np.heading[0]
 
             cos_agent, sin_agent = np.cos(agent_heading), np.sin(agent_heading)
-            self.centered_world_from_agent_tf: np.ndarray = np.array(
-                [
-                    [cos_agent, -sin_agent, agent_pos[0]],
-                    [sin_agent, cos_agent, agent_pos[1]],
-                    [0.0, 0.0, 1.0],
-                ]
-            )
+
+            if incl_z:
+                self.centered_world_from_agent_tf: np.ndarray = np.array(
+                    [
+                        [cos_agent, -sin_agent, 0.0, agent_pos[0]],
+                        [sin_agent, cos_agent, 0.0, agent_pos[1]],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                )
+            else:
+                self.centered_world_from_agent_tf: np.ndarray = np.array(
+                    [
+                        [cos_agent, -sin_agent, agent_pos[0]],
+                        [sin_agent, cos_agent, agent_pos[1]],
+                        [0.0, 0.0, 1.0],
+                    ]
+                )
             self.centered_agent_from_world_tf: np.ndarray = np.linalg.inv(
                 self.centered_world_from_agent_tf
             )
         else:
-            self.centered_agent_from_world_tf: np.ndarray = np.eye(3)
-            self.centered_world_from_agent_tf: np.ndarray = np.eye(3)
+            self.centered_agent_from_world_tf: np.ndarray = np.eye(4 if incl_z else 3)
+            self.centered_world_from_agent_tf: np.ndarray = np.eye(4 if incl_z else 3)
 
         ### NEIGHBOR-SPECIFIC DATA ###
         def distance_limit(agent_types: np.ndarray, target_type: int) -> np.ndarray:
@@ -404,7 +439,7 @@ class SceneBatchElement:
         nearby_agents, self.agent_types_np = self.get_nearby_agents(
             scene_time, self.centered_agent, distance_limit
         )
-
+        self.agents = nearby_agents
         self.num_agents = len(nearby_agents)
         self.agent_names = [agent.name for agent in nearby_agents]
         (
@@ -440,6 +475,44 @@ class SceneBatchElement:
                 self.cache if self.cache.is_traffic_light_data_cached() else None,
                 **vector_map_params if vector_map_params is not None else None,
             )
+            if vector_map_params.get("calc_lane_graph", False):
+                # not tested
+                ego_xyh = np.concatenate(
+                    [
+                        self.centered_agent_state_np.position,
+                        self.centered_agent_state_np.heading,
+                    ]
+                )
+                num_pts = vector_map_params.get("num_lane_pts", 30)
+                max_num_lanes = vector_map_params.get("max_num_lanes", 20)
+                remove_single_successor = vector_map_params.get(
+                    "remove_single_successor", False
+                )
+                (
+                    self.num_lanes,
+                    self.lane_xyh,
+                    self.lane_adj,
+                    self.lane_ids,
+                    self.road_edge_xyzh,
+                ) = gen_lane_graph(
+                    self.vec_map,
+                    ego_xyh,
+                    self.centered_agent_from_world_tf,
+                    num_pts,
+                    max_num_lanes,
+                    remove_single_successor=remove_single_successor,
+                    get_road_edges=vector_map_params.get("incl_road_edges", False),
+                    lane_graph_cache=lane_graph_cache,
+                )
+
+            else:
+                self.lane_xyh = None
+                self.lane_adj = None
+                self.lane_ids = list()
+                self.num_lanes = 0
+                self.road_edge_xyzh = None
+
+        self.scene_id = scene_time.scene.name
 
         ### ROBOT DATA ###
         self.robot_future_np: Optional[StateArray] = None
@@ -581,6 +654,132 @@ class SceneBatchElement:
             (robot_curr_np[np.newaxis, :], robot_fut_np), axis=0
         ).view(self.cache.obs_type)
         return robot_curr_and_fut_np
+
+
+def gen_lane_graph(
+    vec_map,
+    ego_xyh,
+    agent_from_world,
+    num_pts=20,
+    max_num_lanes=15,
+    radius=150,
+    get_road_edges=False,
+    remove_single_successor=False,
+    lane_graph_cache=None,
+):
+    close_lanes, dis = get_close_lanes(radius, ego_xyh, vec_map, num_pts)
+    lanes_by_id = {lane.id: lane for lane in close_lanes}
+    dis_by_id = {lane.id: dis[i] for i, lane in enumerate(close_lanes)}
+    if lane_graph_cache is not None:
+        idx = np.argsort(dis)[:max_num_lanes]
+        lane_ids = [close_lanes[i].id for i in idx]
+        num_lanes = len(lane_ids)
+        cache_idx = [lane_graph_cache.lane_ids.index(id) for id in lane_ids]
+        lane_xyh = lane_graph_cache.lane_centerlines[cache_idx]
+        lane_adj = lane_graph_cache.lane_connectivity[cache_idx][:, cache_idx]
+        lane_xyh = transform_xyh_np(
+            lane_xyh.reshape(-1, 3), agent_from_world[None]
+        ).reshape(num_lanes, -1, 3)
+        road_edge_xyzh = None
+        return num_lanes, lane_xyh, lane_adj, lane_ids, road_edge_xyzh
+
+    if remove_single_successor:
+        for lane in close_lanes:
+            while len(lane.next_lanes) == 1:
+                # if there are more than one succeeding lanes, then we abort the merging
+                next_id = list(lane.next_lanes)[0]
+
+                if next_id in lanes_by_id:
+                    next_lane = lanes_by_id[next_id]
+                    shared_next = False
+                    for id in next_lane.prev_lanes:
+                        if id != lane.id and id in lanes_by_id:
+                            shared_next = True
+                            break
+                    if shared_next:
+                        # if the next lane shares two prev lanes in the close_lanes, then we abort the merging
+                        break
+                    lane.combine_next(lanes_by_id[next_id])
+                    dis_by_id[lane.id] = min(dis_by_id[lane.id], dis_by_id[next_id])
+                    lanes_by_id.pop(next_id)
+                else:
+                    break
+        close_lanes = list(lanes_by_id.values())
+        dis = np.array([dis_by_id[lane.id] for lane in close_lanes])
+    num_lanes = len(close_lanes)
+    if num_lanes > max_num_lanes:
+        idx = dis.argsort()[:max_num_lanes]
+        close_lanes = [lane for i, lane in enumerate(close_lanes) if i in idx]
+        num_lanes = max_num_lanes
+
+    if num_lanes > 0:
+        lane_xyh = list()
+        lane_adj = np.zeros([len(close_lanes), len(close_lanes)], dtype=np.int32)
+        lane_ids = [lane.id for lane in close_lanes]
+
+        for i, lane in enumerate(close_lanes):
+            center = lane.center.interpolate(num_pts).points[:, [0, 1, 3]]
+            center_local = transform_xyh_np(
+                # Add pts dimension and select x, y and homogeneous dimension
+                center,
+                agent_from_world[None][..., [0, 1, -1]][..., [0, 1, -1], :],
+            )
+            lane_xyh.append(center_local)
+            # construct lane adjacency matrix
+            for adj_lane_id in lane.next_lanes:
+                if adj_lane_id in lane_ids:
+                    lane_adj[
+                        i, lane_ids.index(adj_lane_id)
+                    ] = LaneSegRelation.NEXT.value
+
+            for adj_lane_id in lane.prev_lanes:
+                if adj_lane_id in lane_ids:
+                    lane_adj[
+                        i, lane_ids.index(adj_lane_id)
+                    ] = LaneSegRelation.PREV.value
+
+            for adj_lane_id in lane.adj_lanes_left:
+                if adj_lane_id in lane_ids:
+                    lane_adj[
+                        i, lane_ids.index(adj_lane_id)
+                    ] = LaneSegRelation.LEFT.value
+
+            for adj_lane_id in lane.adj_lanes_right:
+                if adj_lane_id in lane_ids:
+                    lane_adj[
+                        i, lane_ids.index(adj_lane_id)
+                    ] = LaneSegRelation.RIGHT.value
+        lane_xyh = np.stack(lane_xyh, axis=0)
+        lane_xyh = lane_xyh
+        lane_adj = lane_adj
+    else:
+        lane_xyh = np.zeros([0, num_pts, 3])
+        lane_adj = np.zeros([0, 0])
+        lane_ids = list()
+
+    road_edge_xyzh = None
+    if get_road_edges:
+        close_road_edges, re_dis = get_close_road_edges(
+            radius, ego_xyh, vec_map, num_pts
+        )
+        num_road_edges = len(close_road_edges)
+        if num_road_edges > max_num_lanes:
+            idx = re_dis.argsort()[:max_num_lanes]
+            close_road_edges = [
+                road_edge for i, road_edge in enumerate(close_road_edges) if i in idx
+            ]
+            num_road_edges = max_num_lanes
+
+        if num_road_edges > 0:
+            road_edge_xyzh = list()
+            for i, road_edge in enumerate(close_road_edges):
+                polyline = road_edge.polyline.interpolate(num_pts).points
+                # TODO: What to do when `agent_from_world` doesn't have z coord?
+                polyline_local = transform_xyh_np(polyline, agent_from_world[None])
+                road_edge_xyzh.append(polyline_local)
+            road_edge_xyzh = np.stack(road_edge_xyzh, axis=0)
+
+    return num_lanes, lane_xyh, lane_adj, lane_ids, road_edge_xyzh
 
 
 def is_agent_stationary(cache: SceneCache, agent_info: AgentMetadata) -> bool:

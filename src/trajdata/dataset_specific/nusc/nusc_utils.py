@@ -20,6 +20,7 @@ from trajdata.maps.vec_map_elements import (
     RoadLane,
 )
 from trajdata.utils import arr_utils, map_utils
+from trajdata.maps.vec_map import split_lane_segments
 
 NUSC_DT: Final[float] = 0.5
 
@@ -371,7 +372,9 @@ def extract_area(nusc_map: NuScenesMap, area_record) -> np.ndarray:
     return np.array([(node["x"], node["y"]) for node in polygon_nodes])
 
 
-def populate_vector_map(vector_map: VectorMap, nusc_map: NuScenesMap) -> None:
+def populate_vector_map(
+    vector_map: VectorMap, nusc_map: NuScenesMap, max_lane_length=None
+) -> None:
     # Setting the map bounds.
     vector_map.extent = np.array(
         [
@@ -427,7 +430,12 @@ def populate_vector_map(vector_map: VectorMap, nusc_map: NuScenesMap) -> None:
         # )
 
         # Adding the element to the map.
-        vector_map.add_map_element(new_lane)
+        if max_lane_length is not None:
+            split_lanes = split_lane_segments(new_lane, max_len=max_lane_length)
+            for lane in split_lanes:
+                vector_map.add_map_element(lane)
+        else:
+            vector_map.add_map_element(new_lane)
         overall_pbar.update()
 
     for lane_record in nusc_map.lane_connector:

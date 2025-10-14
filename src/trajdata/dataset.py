@@ -1,15 +1,24 @@
 import gc
 import json
 import random
-import re
 import time
-import warnings
 from collections import defaultdict
 from functools import partial
 from itertools import chain
 from os.path import isfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Final,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import dill
 import numpy as np
@@ -45,11 +54,14 @@ from trajdata.utils import (
     agent_utils,
     env_utils,
     py_utils,
-    raster_utils,
     scene_utils,
     string_utils,
+    map_utils,
 )
 from trajdata.utils.parallel_utils import parallel_iapply
+
+# TODO(bivanovic): Move this to a better place in the codebase.
+DEFAULT_PX_PER_M: Final[float] = 2.0
 
 
 class UnifiedDataset(Dataset):
@@ -115,6 +127,7 @@ class UnifiedDataset(Dataset):
             Callable[..., Union[AgentBatchElement, SceneBatchElement]]
         ] = (),
         rank: int = 0,
+        cache_lane_graphs: bool = False,
     ) -> None:
         """Instantiates a PyTorch Dataset object which aggregates data
         from multiple trajectory forecasting datasets.
@@ -157,9 +170,9 @@ class UnifiedDataset(Dataset):
             rank (int, optional): Proccess rank when using torch DistributedDataParallel for multi-GPU training. Only the rank 0 process will be used for caching.
         """
         self.desired_data: List[str] = desired_data
-        self.scene_description_contains: Optional[
-            List[str]
-        ] = scene_description_contains
+        self.scene_description_contains: Optional[List[str]] = (
+            scene_description_contains
+        )
         self.centric: str = centric
         self.desired_dt: float = desired_dt
 
@@ -191,7 +204,7 @@ class UnifiedDataset(Dataset):
             raster_map_params
             if raster_map_params is not None
             # Allowing for parallel map processing in case the user specifies num_workers.
-            else {"px_per_m": raster_utils.DEFAULT_PX_PER_M, "num_workers": num_workers}
+            else {"px_per_m": DEFAULT_PX_PER_M, "num_workers": num_workers}
         )
 
         self.incl_vector_map = incl_vector_map
@@ -256,14 +269,18 @@ class UnifiedDataset(Dataset):
                 flush=True,
             )
 
-        self.check_args_combinations(matching_datasets)
-
         self._map_api: Optional[MapAPI] = None
         if self.incl_vector_map:
             self._map_api = MapAPI(
                 self.cache_path,
-                keep_in_memory=self.vector_map_params.get("keep_in_memory", True),
+                keep_in_memory=vector_map_params.get("keep_in_memory", True),
             )
+
+        self.cache_lane_graphs = cache_lane_graphs
+        if cache_lane_graphs:
+            self.lane_graph_cache = dict()
+        else:
+            self.lane_graph_cache = dict()
 
         all_scenes_list: Union[List[SceneMetadata], List[Scene]] = list()
         for env in self.envs:
@@ -318,7 +335,7 @@ class UnifiedDataset(Dataset):
                             env.cache_maps(
                                 self.cache_path,
                                 self.cache_class,
-                                self.raster_map_params,
+                                {**self.raster_map_params,**self.vector_map_params},
                             )
 
                         # Wait for rank 0 process to be done with caching.
@@ -328,9 +345,9 @@ class UnifiedDataset(Dataset):
                         ):
                             distributed.barrier()
 
-                    scenes_list: List[
-                        SceneMetadata
-                    ] = self._get_desired_scenes_from_env(matching_datasets, env)
+                    scenes_list: List[SceneMetadata] = (
+                        self._get_desired_scenes_from_env(matching_datasets, env)
+                    )
 
                 if self.incl_vector_map and env.metadata.map_locations is not None:
                     # env.metadata.map_locations can be none for map-containing
@@ -387,62 +404,9 @@ class UnifiedDataset(Dataset):
                 )
 
             self._cache_data_index(data_index)
-
-        # Wait for rank 0 process to be done with caching.
         if distributed.is_initialized() and distributed.get_world_size() > 1:
             distributed.barrier()
-
         self._cached_batch_elements = None
-
-    def check_args_combinations(self, chosen_datasets: List[SceneTag]) -> None:
-        """Warn users about potential "gotcha" combinations of arguments,
-        usually involving fundamental limits in datasets.
-        """
-        waymo_warning_given: bool = False
-        waymo_pattern: re.Pattern = re.compile("waymo")
-
-        nuplan_warning_given: bool = False
-        nuplan_pattern: re.Pattern = re.compile("nuplan")
-
-        dataset: SceneTag
-        for dataset in chosen_datasets:
-            if (
-                not waymo_warning_given
-                and self.vector_map_params["incl_road_areas"]
-                and dataset.matches_any(waymo_pattern)
-            ):
-                warnings.warn(
-                    (
-                        "\n\n############ WARNING! ############\n"
-                        "Waymo has many gaps in the associations between "
-                        "lane centerlines and boundaries,\nmaking it difficult "
-                        "to construct lane edge polylines or road area polygons.\n"
-                        "The ones currently provided by trajdata should be considered "
-                        "low quality!"
-                        "\n#################################\n"
-                    )
-                )
-                waymo_warning_given = True
-
-            elif (
-                not nuplan_warning_given
-                and self.incl_vector_map
-                and dataset.matches_any(nuplan_pattern)
-            ):
-                warnings.warn(
-                    (
-                        "\n\n############ WARNING! ############\n"
-                        "nuPlan uses Shapely to represent its map. "
-                        "Shapely only supports 2D coordinates.\nHowever, "
-                        "nuPlan's agent trajectories are provided in 3D "
-                        "(with a non-zero z-coordinate).\nThus, any "
-                        "spatial queries (e.g., nearest lane or road area) "
-                        "should be executed with the z-coordinate "
-                        "set to 0.0 manually."
-                        "\n#################################\n"
-                    )
-                )
-                nuplan_warning_given = True
 
     def _index_cache_path(
         self, ret_args: bool = False
@@ -451,23 +415,31 @@ class UnifiedDataset(Dataset):
         # and hashed together here.
         impactful_args: Dict[str, Any] = {
             "desired_data": tuple(self.desired_data),
-            "scene_description_contains": tuple(self.scene_description_contains)
-            if self.scene_description_contains is not None
-            else None,
+            "scene_description_contains": (
+                tuple(self.scene_description_contains)
+                if self.scene_description_contains is not None
+                else None
+            ),
             "centric": self.centric,
             "desired_dt": self.desired_dt,
             "history_sec": self.history_sec,
             "future_sec": self.future_sec,
             "incl_robot_future": self.incl_robot_future,
-            "only_types": tuple(t.name for t in self.only_types)
-            if self.only_types is not None
-            else None,
-            "only_predict": tuple(t.name for t in self.only_predict)
-            if self.only_predict is not None
-            else None,
-            "no_types": tuple(t.name for t in self.no_types)
-            if self.no_types is not None
-            else None,
+            "only_types": (
+                tuple(t.name for t in self.only_types)
+                if self.only_types is not None
+                else None
+            ),
+            "only_predict": (
+                tuple(t.name for t in self.only_predict)
+                if self.only_predict is not None
+                else None
+            ),
+            "no_types": (
+                tuple(t.name for t in self.no_types)
+                if self.no_types is not None
+                else None
+            ),
             "ego_only": self.ego_only,
         }
         index_hash: str = py_utils.hash_dict(impactful_args)
@@ -528,7 +500,7 @@ class UnifiedDataset(Dataset):
             print(f"Loading cache from {cache_path} ...", end="")
             t = time.time()
             with open(cache_path, "rb") as f:
-                self._cached_batch_elements, keep_ids = dill.load(f, encoding="latin1")
+                self._cached_batch_elements, keep_mask = dill.load(f, encoding="latin1")
             print(f" done in {time.time() - t:.1f}s.")
 
         else:
@@ -653,9 +625,7 @@ class UnifiedDataset(Dataset):
             f"Kept {self._data_len}/{old_len} elements, {self._data_len/old_len*100.0:.2f}%."
         )
 
-    def _get_data_index(
-        self, num_workers: int, scene_paths: List[Path]
-    ) -> Union[
+    def _get_data_index(self, num_workers: int, scene_paths: List[Path]) -> Union[
         List[Tuple[str, int, np.ndarray]],
         List[Tuple[str, int, List[Tuple[str, np.ndarray]]]],
     ]:
@@ -840,6 +810,9 @@ class UnifiedDataset(Dataset):
                 return_dict=return_dict,
                 pad_format=pad_format,
                 batch_augments=batch_augments,
+                desired_num_agents = self.max_agent_num,
+                desired_hist_len = int(self.history_sec[1]/self.desired_dt),
+                desired_fut_len = int(self.future_sec[1]/self.desired_dt),
             )
         else:
             raise ValueError(f"{self.centric}-centric data batches are not supported.")
@@ -874,8 +847,7 @@ class UnifiedDataset(Dataset):
     ) -> Union[List[Scene], List[SceneMetadata]]:
         scenes_list: Union[List[Scene], List[SceneMetadata]] = list()
         for scene_tag in tqdm(
-            scene_tags, desc=f"Getting Scenes from {env.name} with scene tag {scene_tags}",
-            disable=not self.verbose
+            scene_tags, desc=f"Getting Scenes from {env.name}", disable=not self.verbose
         ):
             if env.name in scene_tag:
                 scenes_list += env.get_matching_scenes(
@@ -1078,6 +1050,16 @@ class UnifiedDataset(Dataset):
                 only_types=self.only_types,
                 no_types=self.no_types,
             )
+            if self.cache_lane_graphs:
+                map_name: str = (
+                    f"{scene_time.scene.env_name}:{scene_time.scene.location}"
+                )
+                if map_name not in self.lane_graph_cache:
+                    self.lane_graph_cache[map_name] = map_utils.obtain_lane_graph(
+                        scene_time.scene,
+                        self._map_api,
+                        self.vector_map_params,
+                    )
 
             batch_element: SceneBatchElement = SceneBatchElement(
                 scene_cache,
@@ -1095,6 +1077,9 @@ class UnifiedDataset(Dataset):
                 self.standardize_data,
                 self.standardize_derivatives,
                 self.max_agent_num,
+                lane_graph_cache=(
+                    self.lane_graph_cache[map_name] if self.cache_lane_graphs else None
+                ),
             )
         elif self.centric == "agent":
             scene_time_agent: SceneTimeAgent = SceneTimeAgent.from_cache(

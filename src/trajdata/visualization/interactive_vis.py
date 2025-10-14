@@ -12,7 +12,7 @@ from trajdata.utils.arr_utils import transform_coords_2d_np
 from trajdata.visualization.interactive_figure import InteractiveFigure
 
 
-def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: Path):
+def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: Path, **kwargs) -> None:
     fig = InteractiveFigure(
         tooltips=[
             ("Class", "@type"),
@@ -76,6 +76,7 @@ def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: 
                 incl_road_areas=True,
                 incl_ped_crosswalks=True,
                 incl_ped_walkways=True,
+                incl_road_edges=True if kwargs.get("incl_road_edges", False) else False
             ),
             # x_min, x_max, y_min, y_max
             bbox=(
@@ -84,10 +85,12 @@ def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: 
                 y - map_vis_radius,
                 y + map_vis_radius,
             ),
+            kwargs=kwargs,
         )
 
     fig.add_lines(agent_histories)
-    fig.add_lines(agent_futures)
+    if agent_fut_np.shape[0] > 0:
+        fig.add_lines(agent_futures)
 
     agent_extent: np.ndarray = batch.agent_hist_extent[batch_idx, -1]
     if agent_extent.isnan().any():
@@ -116,7 +119,8 @@ def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: 
         "y": [y],
         "xs": [agent_rect_coords[:, 0] + x],
         "ys": [agent_rect_coords[:, 1] + y],
-        "fill_color": [vis_utils.get_agent_type_color(agent_type)],
+        # "fill_color": [vis_utils.get_agent_type_color(agent_type)],
+        "fill_color": [vis_utils.get_agent_type_color('EGO')], # ego color
         "line_color": ["black"],
         "fill_alpha": [0.7],
         "type": [str(AgentType(agent_type))[len("AgentType.") :]],
@@ -142,7 +146,8 @@ def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: 
     dir_patches_data = {
         "xs": [dir_patch_coords[:, 0] + x],
         "ys": [dir_patch_coords[:, 1] + y],
-        "fill_color": [vis_utils.get_agent_type_color(agent_type)],
+        "fill_color": [vis_utils.get_agent_type_color('EGO')], # ego color
+        # "fill_color": [vis_utils.get_agent_type_color(agent_type)],
         "line_color": ["black"],
         "alpha": [0.7],
     }
@@ -153,7 +158,8 @@ def plot_agent_batch_interactive(batch: AgentBatch, batch_idx: int, cache_path: 
         agent_extent: np.ndarray = batch.neigh_hist_extents[batch_idx, n_neigh, -1]
 
         if agent_extent.isnan().any():
-            raise ValueError("Agent extents cannot be NaN!")
+            continue
+            # raise ValueError("Agent extents cannot be NaN!")
 
         length = agent_extent[0].item()
         width = agent_extent[1].item()

@@ -1,4 +1,5 @@
 import logging
+import os
 import socket
 import threading
 import time
@@ -9,12 +10,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import cv2
 import numpy as np
 import pandas as pd
+import panel as pn
 from bokeh.application import Application
 from bokeh.application.handlers import FunctionHandler
 from bokeh.document import Document, without_document_lock
+from bokeh.io import export_png
 from bokeh.io.export import get_screenshot_as_png
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -29,7 +31,7 @@ from bokeh.models import (
     Select,
     Slider,
 )
-from bokeh.plotting import figure
+from bokeh.plotting import curdoc, figure
 from bokeh.server.server import Server
 from selenium import webdriver
 from tornado import gen
@@ -43,61 +45,19 @@ from trajdata.maps.map_api import MapAPI
 from trajdata.utils import vis_utils
 
 
-class InteractiveAnimation:
-    def __init__(
-        self,
-        main_func: Callable[[Document, IOLoop], None],
-        port: Optional[int] = None,
-        **kwargs,
-    ) -> None:
-        self.main_func = main_func
-        self.port = port
-        self.kwargs = kwargs
-
-    def get_open_port(self) -> int:
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            s.bind(("", 0))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return s.getsockname()[1]
-
-    def show(self) -> None:
-        io_loop = IOLoop()
-
-        if self.port is None:
-            self.port = self.get_open_port()
-
-        def kill_on_tab_close(session_context):
-            io_loop.stop()
-
-        def app_init(doc: Document):
-            doc.on_session_destroyed(kill_on_tab_close)
-            self.main_func(doc=doc, io_loop=io_loop, **self.kwargs)
-            return doc
-
-        server = Server(
-            {"/": Application(FunctionHandler(app_init))},
-            io_loop=io_loop,
-            port=self.port,
-            check_unused_sessions_milliseconds=500,
-            unused_session_lifetime_milliseconds=500,
-        )
-        server.start()
-
-        # print(f"Opening Bokeh application on http://localhost:{self.port}/")
-        server.io_loop.add_callback(server.show, "/")
-        server.io_loop.start()
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            server.io_loop.close()
-
-
 def animate_agent_batch_interactive(
-    doc: Document, io_loop: IOLoop, batch: AgentBatch, batch_idx: int, cache_path: Path
+    batch: AgentBatch,
+    batch_idx: int,
+    cache_path: Path,
+    render_immediately: bool = False, 
+    incl_road_edges: bool = False,
+    embeded: bool = False,
+    image_files: List[str] = None,
+    violations = None, 
 ) -> None:
-    agent_data_df = vis_utils.extract_full_agent_data_df(batch, batch_idx)
+    agent_data_df = vis_utils.extract_full_agent_data_df(batch, batch_idx,violations)
 
-    # Figure creation and a few initial settings.
+    # figure creation and a few initial settings.
     width: int = 1280
     aspect_ratio: float = 16 / 9
     data_vis_margin: float = 10.0
@@ -154,6 +114,7 @@ def animate_agent_batch_interactive(
             incl_road_areas=True,
             incl_ped_crosswalks=True,
             incl_ped_walkways=True,
+            incl_road_edges=True if incl_road_edges else False,
         )
 
         (
@@ -180,13 +141,18 @@ def animate_agent_batch_interactive(
 
     # Some neighbors can have more history than the agent to be predicted
     # (the data-collecting agent has observed the neighbors for longer).
-    full_H = max(
-        batch.agent_hist_len[batch_idx].item(),
-        *batch.neigh_hist_len[batch_idx].tolist(),
-    )
-    full_T = max(
-        batch.agent_fut_len[batch_idx].item(), *batch.neigh_fut_len[batch_idx].tolist()
-    )
+    if batch.neigh_hist_len[batch_idx].shape[0] == 0:
+        full_H = batch.agent_hist_len[batch_idx].item()
+        full_T = batch.agent_fut_len[batch_idx].item()
+    else:
+        full_H = max(
+            batch.agent_hist_len[batch_idx].item(),
+            *batch.neigh_hist_len[batch_idx].tolist(),
+        )
+        full_T = max(
+            batch.agent_fut_len[batch_idx].item(), 
+            *batch.neigh_fut_len[batch_idx].tolist(),
+        )
 
     def create_multi_line_data(agents_df: pd.DataFrame) -> Dict[str, List]:
         lines_data = defaultdict(list)
@@ -245,6 +211,9 @@ def animate_agent_batch_interactive(
         slice_multi_line_data(future_line_data_df, slice(full_H, None), check_idx=0)
     )
 
+        
+    
+
     history_lines = fig.multi_line(
         xs="xs",
         ys="ys",
@@ -262,6 +231,7 @@ def animate_agent_batch_interactive(
         line_width=2,
         source=future_lines_cds,
     )
+    
 
     # Agent rectangles/directional arrows at the current timestep.
     agent_rects = fig.patches(
@@ -283,19 +253,63 @@ def animate_agent_batch_interactive(
         source=agent_cds,
         view=curr_time_view,
     )
-
+    if batch.extras is not None and "action_sample" in batch.extras:
+        action_sample = batch.extras["action_sample"][batch_idx,0]
+        action_sample = action_sample.cpu().numpy()
+        action_sample = np.concatenate([np.full([full_H,*action_sample.shape[1:]],fill_value=np.nan),action_sample],axis=0)
+        action_sample_cds = ColumnDataSource(
+            dict(xs=[action_sample[0,i,:,0] for i in range(action_sample.shape[1])],
+                 ys=[action_sample[0,i,:,1] for i in range(action_sample.shape[1])],
+            )
+        )
+        action_sample_lines = fig.multi_line(
+            xs="xs",
+            ys="ys",
+            line_color="green",
+            line_dash="dashed",
+            line_width=1.5,
+            source=action_sample_cds
+        )
+    else:
+        action_sample_lines = None
     scene_ts: int = batch.scene_ts[batch_idx].item()
 
     # Controlling the timestep shown to users.
+    end_time: int = min(agent_cds.data["t"].max(), len(violations)) if violations is not None else agent_cds.data["t"].max()
+    total_timesteps: int = end_time - agent_cds.data["t"].min() + 1
+    abs_total_timesteps: int = agent_cds.data["t"].max() - agent_cds.data["t"].min() + 1
     time_slider = Slider(
         start=agent_cds.data["t"].min(),
-        end=agent_cds.data["t"].max(),
+        end=end_time,
         step=1,
         value=0,
         title=f"Current Timestep (scene timestep {scene_ts})",
     )
 
     dt: float = batch.dt[batch_idx].item()
+    
+    # adding image if available
+    if image_files is not None:
+        from PIL import Image
+        
+        def pil_image_to_rgba(image_file):
+            image = Image.open(image_file)
+            image = image.convert("RGBA")  # Ensure the image is in RGBA mode
+            img_array = np.array(image)  # Convert the image to a numpy array
+            # Flatten the RGBA array into a 1D array in the format Bokeh expects (row-major order)
+            img_flat = np.flipud(img_array).flatten()
+            return img_flat.view(np.uint32).reshape((image.height, image.width))
+
+        img_source = ColumnDataSource(data={'image': [pil_image_to_rgba(image_files[0])]})
+
+        # Set up the figure for displaying the image
+        p = figure(x_range=(0, 1), y_range=(0, 1), width=Image.open(image_files[0]).width, height=Image.open(image_files[0]).height)
+        p.image_rgba(image='image', source=img_source, x=0, y=0, dw=1, dh=1)
+        p.xaxis.visible = False
+        p.yaxis.visible = False
+        p.xgrid.visible = False
+        p.ygrid.visible = False
+        p.outline_line_color = None 
 
     # Ensuring that information gets updated upon a cahnge in the slider value.
     def time_callback(attr, old, new) -> None:
@@ -306,12 +320,20 @@ def animate_agent_batch_interactive(
         future_lines_cds.data = slice_multi_line_data(
             future_line_data_df, slice(new + full_H, None), check_idx=0
         )
+        if action_sample_lines is not None:
+            action_sample_cds.data = dict(xs=[action_sample[new+full_H,i,:,0] for i in range(action_sample.shape[1])],
+                                        ys=[action_sample[new+full_H,i,:,1] for i in range(action_sample.shape[1])],
+                                    )
 
         if new == 0:
             time_slider.title = f"Current Timestep (scene timestep {scene_ts})"
         else:
             n_steps = abs(new)
             time_slider.title = f"{n_steps} timesteps ({n_steps * dt:.2f} s) into the {'future' if new > 0 else 'past'}"
+
+        if image_files is not None:
+            new_image_idx = new * len(image_files) // abs_total_timesteps 
+            img_source.data = {'image': [pil_image_to_rgba(image_files[new_image_idx])]}
 
     time_slider.on_change("value", time_callback)
 
@@ -322,16 +344,20 @@ def animate_agent_batch_interactive(
                 ("Class", "@type"),
                 ("Position", "(@x, @y) m"),
                 ("Speed", "@speed_mps m/s (@speed_kph km/h)"),
+                ("Violation", "@violation"),
             ],
             renderers=[agent_rects],
         )
     )
 
+    exit_button = Button(label="Exit", button_type="danger", width=60)
     def button_callback():
         # Stop the server.
-        io_loop.stop()
+        import sys
 
-    exit_button = Button(label="Exit", button_type="danger", width=60)
+        from tornado.ioloop import IOLoop
+
+        sys.exit()
     exit_button.on_click(button_callback)
 
     # Writing animation callback functions so that the play/pause button animate the
@@ -351,12 +377,12 @@ def animate_agent_batch_interactive(
         if play_button.label.startswith("►"):
             play_button.label = "❚❚ Pause"
 
-            play_cb_manager[0] = doc.add_periodic_callback(
+            play_cb_manager[0] = play_button.document.add_periodic_callback(
                 animate_update, period_milliseconds=int(dt * 1000)
             )
         else:
             play_button.label = "► Play"
-            doc.remove_periodic_callback(play_cb_manager[0])
+            play_button.document.remove_periodic_callback(play_cb_manager[0])
 
     play_button = Button(label="► Play", width=100)
     play_button.on_click(animate)
@@ -365,12 +391,24 @@ def animate_agent_batch_interactive(
     # (allows us to hide them on click later!)
     agent_legend_elems = [
         fig.rect(
+            fill_color='lightblue',
+            line_color='black',
+            name='EGO'
+        ),
+        fig.rect(
+            fill_color=vis_utils.get_agent_type_color('EGO'),
+            line_color='black',
+            name='EGO_Violation'
+        )
+    ]
+    agent_legend_elems.extend([
+        fig.rect(
             fill_color=vis_utils.get_agent_type_color(x),
             line_color="black",
             name=vis_utils.agent_type_to_str(x),
         )
         for x in AgentType
-    ]
+    ])
 
     map_legend_elems = [LegendItem(label="Lane Center", renderers=[lane_centers])]
 
@@ -450,42 +488,7 @@ def animate_agent_batch_interactive(
         animate_update()
 
     def execute_save_animation(file_path: Path) -> None:
-        images = []
-
-        chrome_options = webdriver.ChromeOptions()
-        chrome_options.headless = True
-        driver = webdriver.Chrome(chrome_options=chrome_options)
-
-        n_frames = render_range_slider.value[1] - render_range_slider.value[0] + 1
-        for frame_index in trange(n_frames, desc="Rendering Video"):
-            # Giving the doc a chance to update the figure.
-            time.sleep(0.1)
-
-            image = get_screenshot_as_png(fig, driver=driver)
-            shape = image.size
-            images.append(image)
-
-            doc.add_next_tick_callback(
-                partial(
-                    after_frame_save,
-                    label=f"Rendering... ({100*(frame_index+1)/n_frames:.0f}%)",
-                )
-            )
-
-        if file_path.suffix == ".mp4":
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        elif file_path.suffix == ".avi":
-            fourcc = cv2.VideoWriter_fourcc("M", "J", "P", "G")
-
-        video_obj = cv2.VideoWriter(
-            filename=str(file_path), fourcc=fourcc, fps=1.0 / dt, frameSize=shape
-        )
-        for image in images:
-            cv2_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            video_obj.write(cv2_image)
-        video_obj.release()
-
-        doc.add_next_tick_callback(reset_buttons)
+        raise NotImplementedError()
 
     @gen.coroutine
     @without_document_lock
@@ -516,19 +519,25 @@ def animate_agent_batch_interactive(
             args=(Path(filename + filetype_select.value),),
         ).start()
 
-    video_button.on_click(
-        partial(
-            save_animation,
-            filename=(
-                "_".join([env_name, map_name, scene_id, f"t{scene_ts}", agent_name])
-            ),
-        )
+    video_button_fn = partial(
+        save_animation,
+        filename=("_".join([env_name, map_name, scene_id, f"t{scene_ts}", agent_name])),
     )
+    video_button.on_click(video_button_fn)
 
-    doc.add_root(
-        column(
-            fig,
-            row(play_button, time_slider, exit_button),
-            row(video_button, render_range_slider, filetype_select),
-        )
+    layout = column(
+        fig if image_files is None else row(fig, p),
+        # row(play_button, time_slider, exit_button),
+        row(play_button, time_slider),
+        row(video_button, render_range_slider, filetype_select),
     )
+    bokeh_pane = pn.pane.Bokeh(layout)
+    
+    if embeded:
+        return bokeh_pane
+    
+    server = pn.serve(bokeh_pane)
+    if render_immediately:
+        video_button_fn()
+
+    return server

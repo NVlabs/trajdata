@@ -8,6 +8,7 @@ import numpy as np
 import nuplan.planning.script.config.common as common_cfg
 import pandas as pd
 import yaml
+import math
 from nuplan.common.maps.nuplan_map.nuplan_map import NuPlanMap
 from tqdm import tqdm
 
@@ -23,6 +24,7 @@ from trajdata.maps.vec_map_elements import (
     RoadLane,
 )
 from trajdata.utils import map_utils
+from trajdata.maps.vec_map import split_lane_segments
 
 NUPLAN_DT: Final[float] = 0.05
 NUPLAN_FULL_MAP_NAME_DICT: Final[Dict[str, str]] = {
@@ -190,6 +192,7 @@ class NuPlanObject:
 
 
 def nuplan_type_to_unified_type(nuplan_type: str) -> AgentType:
+    # TODO map traffic cones, barriers to static; generic_object to pedestrian
     if nuplan_type == "pedestrian":
         return AgentType.PEDESTRIAN
     elif nuplan_type == "bicycle":
@@ -259,7 +262,10 @@ def extract_area(nuplan_map: NuPlanMap, area_record) -> np.ndarray:
 
 
 def populate_vector_map(
-    vector_map: VectorMap, nuplan_map: NuPlanMap, lane_connector_idxs: pd.Series
+    vector_map: VectorMap,
+    nuplan_map: NuPlanMap,
+    lane_connector_idxs: pd.Series,
+    max_lane_length: Optional[float] = None,
 ) -> None:
     # Setting the map bounds.
     # NOTE: min_pt is especially important here since the world coordinates of nuPlan
@@ -328,14 +334,37 @@ def populate_vector_map(
         # The right boundary of Lane A has Lane A to its left.
         boundary_connectivity_dict[right_boundary_id]["left"].append(lane_id)
 
+        # Find road areas that this lane intersects for faster lane-based lookup later.
+        intersect_filt = nuplan_map._vector_map["drivable_area"].intersects(
+            lane_info["geometry"]
+        )
+        isnear_filt = (
+            nuplan_map._vector_map["drivable_area"].distance(lane_info["geometry"])
+            < 3.0
+        )
+        road_area_ids = set(
+            nuplan_map._vector_map["drivable_area"][intersect_filt | isnear_filt][
+                "fid"
+            ].values
+        )
+        if not road_area_ids:
+            print(f"Warning: no road lane associated with lane {lane_id}")
+
         # "partial" because we aren't adding lane connectivity until later.
         partial_new_lane = RoadLane(
             id=lane_id,
             center=Polyline(center_pts),
             left_edge=Polyline(left_pts),
             right_edge=Polyline(right_pts),
+            road_area_ids=road_area_ids,
         )
-        vector_map.add_map_element(partial_new_lane)
+        if max_lane_length is not None:
+            split_lanes = split_lane_segments(partial_new_lane, max_len=max_lane_length)
+            for lane in split_lanes:
+                vector_map.add_map_element(lane)
+                lane_boundary_dict[lane.id] = boundary_info
+        else:
+            vector_map.add_map_element(partial_new_lane)
         overall_pbar.update()
 
     for fid, polygon_info in nuplan_map._vector_map["drivable_area"].iterrows():

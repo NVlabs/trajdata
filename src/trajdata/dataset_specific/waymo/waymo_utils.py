@@ -8,11 +8,11 @@ import pandas as pd
 import tensorflow as tf
 from intervaltree import Interval, IntervalTree
 from tqdm import tqdm
+from trajdata.maps import TrafficLightStatus, VectorMap
+from trajdata.maps.vec_map import split_lane_segments
+from trajdata.maps.vec_map_elements import PedCrosswalk, Polyline, RoadEdge, RoadLane
 from waymo_open_dataset.protos import map_pb2 as waymo_map_pb2
 from waymo_open_dataset.protos import scenario_pb2
-
-from trajdata.maps import TrafficLightStatus, VectorMap
-from trajdata.maps.vec_map_elements import PedCrosswalk, Polyline, RoadLane
 
 WAYMO_DT: Final[float] = 0.1
 WAYMO_DATASET_NAMES = [
@@ -145,7 +145,10 @@ class WaymoScenarios:
 
 
 def extract_vectorized(
-    map_features: List[waymo_map_pb2.MapFeature], map_name: str, verbose: bool = False
+    map_features: List[waymo_map_pb2.MapFeature],
+    map_name: str,
+    verbose: bool = False,
+    max_lane_length: Optional[float] = None,
 ) -> VectorMap:
     vec_map = VectorMap(map_id=map_name)
 
@@ -175,7 +178,9 @@ def extract_vectorized(
                 # aren't interpolating between others??
                 continue
 
-            road_lanes, modified_lane_ids = translate_lane(map_feature, boundaries)
+            road_lanes, modified_lane_ids = translate_lane(
+                map_feature, boundaries, max_lane_length=max_lane_length
+            )
             if modified_lane_ids:
                 lane_id_remap_dict.update(modified_lane_ids)
 
@@ -206,6 +211,21 @@ def extract_vectorized(
 
             max_pt = np.fmax(max_pt, crosswalk.polygon.xyz.max(axis=0))
             min_pt = np.fmin(min_pt, crosswalk.polygon.xyz.min(axis=0))
+
+        elif map_feature.WhichOneof("feature_data") == "road_edge":
+            if len(map_feature.road_edge.polyline) == 1:
+                continue
+            road_edge = RoadEdge(
+                id=str(map_feature.id),
+                polyline=Polyline(
+                    np.array(
+                        [(pt.x, pt.y, pt.z) for pt in map_feature.road_edge.polyline]
+                    )
+                ),
+            )
+            vec_map.add_map_element(road_edge)
+            max_pt = np.fmax(max_pt, road_edge.polyline.xyz.max(axis=0))
+            min_pt = np.fmin(min_pt, road_edge.polyline.xyz.min(axis=0))
 
         else:
             continue
@@ -473,6 +493,7 @@ def subselect_boundary(
 def translate_lane(
     map_feature: waymo_map_pb2.MapFeature,
     boundaries: Dict[int, Polyline],
+    max_lane_length: Optional[float] = None,
 ) -> Tuple[RoadLane, Optional[Dict[int, List[bytes]]]]:
     lane: waymo_map_pb2.LaneCenter = map_feature.lane
 
@@ -485,37 +506,68 @@ def translate_lane(
         lane_chunks = split_lane_into_chunks(lane, boundaries)
         road_lanes: List[RoadLane] = []
         new_ids: List[bytes] = []
+
         for idx, (lane_center, left_edge, right_edge) in enumerate(lane_chunks):
+            
             road_lane = RoadLane(
-                id=f"{map_feature.id}_{idx}"
-                if len(lane_chunks) > 1
-                else str(map_feature.id),
+                id=(
+                    f"{map_feature.id}_{idx}"
+                    if len(lane_chunks) > 1
+                    else str(map_feature.id)
+                ),
                 center=lane_center,
                 left_edge=left_edge,
                 right_edge=right_edge,
             )
-            new_ids.append(road_lane.id)
+            if max_lane_length is not None:
+                split_lanes = split_lane_segments(road_lane, max_len=max_lane_length)
+                if idx == 0:
+                    split_lanes[0].prev_lanes.update(
+                        [str(eid) for eid in lane.entry_lanes]
+                    )
+                else:
+                    split_lanes[0].prev_lanes.add(f"{map_feature.id}_{idx-1}")
 
-            if idx == 0:
-                road_lane.prev_lanes.update([str(eid) for eid in lane.entry_lanes])
+                if idx == len(lane_chunks) - 1:
+                    split_lanes[-1].next_lanes.update(
+                        [str(eid) for eid in lane.exit_lanes]
+                    )
+                else:
+                    split_lanes[-1].next_lanes.add(f"{map_feature.id}_{idx+1}")
+
+                for split_lane in split_lanes:
+                    # We'll take care of reassigning these IDs to the chunked versions later.
+                    for neighbor in lane.left_neighbors:
+                        split_lane.adj_lanes_left.add(str(neighbor.feature_id))
+
+                    for neighbor in lane.right_neighbors:
+                        split_lane.adj_lanes_right.add(str(neighbor.feature_id))
+                    new_ids.append(split_lane.id)
+                    road_lanes.append(split_lane)
+
             else:
-                road_lane.prev_lanes.add(f"{map_feature.id}_{idx-1}")
+                new_ids.append(road_lane.id)
 
-            if idx == len(lane_chunks) - 1:
-                road_lane.next_lanes.update([str(eid) for eid in lane.exit_lanes])
-            else:
-                road_lane.next_lanes.add(f"{map_feature.id}_{idx+1}")
+                if idx == 0:
+                    road_lane.prev_lanes.update([str(eid) for eid in lane.entry_lanes])
+                else:
+                    road_lane.prev_lanes.add(f"{map_feature.id}_{idx-1}")
 
-            # We'll take care of reassigning these IDs to the chunked versions later.
-            for neighbor in lane.left_neighbors:
-                road_lane.adj_lanes_left.add(str(neighbor.feature_id))
+                if idx == len(lane_chunks) - 1:
+                    road_lane.next_lanes.update([str(eid) for eid in lane.exit_lanes])
+                else:
+                    road_lane.next_lanes.add(f"{map_feature.id}_{idx+1}")
 
-            for neighbor in lane.right_neighbors:
-                road_lane.adj_lanes_right.add(str(neighbor.feature_id))
+                # We'll take care of reassigning these IDs to the chunked versions later.
+                for neighbor in lane.left_neighbors:
+                    road_lane.adj_lanes_left.add(str(neighbor.feature_id))
 
-            road_lanes.append(road_lane)
+                for neighbor in lane.right_neighbors:
+                    road_lane.adj_lanes_right.add(str(neighbor.feature_id))
 
-        if len(lane_chunks) > 1:
+                road_lanes.append(road_lane)
+
+        if len(road_lanes) > 1:
             return road_lanes, {str(map_feature.id): new_ids}
         else:
             return road_lanes, None
@@ -564,3 +616,38 @@ def translate_traffic_state(
 
 def interpolate_array(data: List) -> np.array:
     return pd.DataFrame(data).interpolate(limit_area="inside").to_numpy()
+
+
+def sort_df_by_distance_to_ego_vehicle(
+    df: pd.DataFrame,
+    timestep: int,
+    ego_name: str = "ego",
+    keep_distance_column: bool = False,
+):
+    """Sort df by distance to ego vehicle at timestep."""
+    ego_xy = tuple(df.loc["ego", timestep][["x", "y"]])
+
+    def distance_to_ego_xy(x, y):
+        return np.linalg.norm([x, y] - np.array(ego_xy))
+
+    all_xy_positions = np.stack([df["x"], df["y"]], axis=-1)
+
+    df["dist_to_ego"] = np.linalg.norm(all_xy_positions - np.array(ego_xy), axis=-1)
+    only_t0 = (
+        df.groupby(level="agent_id")
+        .apply(
+            lambda x: (
+                x[x.index.get_level_values("scene_ts") == timestep]
+                if timestep in x.index.get_level_values("scene_ts")
+                else x.iloc[[0]]
+            )
+        )
+        .droplevel(0)
+    )
+    only_t0_sorted = only_t0.sort_values(by="dist_to_ego")
+    sorted_ids = list(only_t0_sorted.index.get_level_values("agent_id"))
+    sorted_df = df.reindex(labels=sorted_ids, level=0)
+    df.drop(columns="dist_to_ego", inplace=True)
+    if not keep_distance_column:
+        sorted_df.drop(columns="dist_to_ego", inplace=True)
+    return sorted_df

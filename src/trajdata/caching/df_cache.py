@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from trajdata.maps import (
-        RasterizedMap,
-        RasterizedMapMetadata,
         VectorMap,
     )
     from trajdata.maps.map_kdtree import MapElementKDTree
@@ -19,11 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, Final, List, Optional, Tuple
 
 import dill
-import kornia
 import numpy as np
 import pandas as pd
-import torch
-import zarr
 
 from trajdata.augmentation.augmentation import Augmentation, DatasetAugmentation
 from trajdata.caching.scene_cache import SceneCache
@@ -31,7 +26,8 @@ from trajdata.data_structures.agent import AgentMetadata, FixedExtent
 from trajdata.data_structures.scene_metadata import Scene
 from trajdata.data_structures.state import NP_STATE_TYPES, StateArray
 from trajdata.maps.traffic_light_status import TrafficLightStatus
-from trajdata.utils import arr_utils, df_utils, raster_utils, state_utils
+from trajdata.utils import arr_utils, df_utils
+from trajdata.utils.scene_utils import is_integer_robust
 
 STATE_COLS: Final[List[str]] = ["x", "y", "z", "vx", "vy", "ax", "ay"]
 EXTENT_COLS: Final[List[str]] = ["length", "width", "height"]
@@ -322,7 +318,7 @@ class DataFrameCache(SceneCache):
     def _upsample_data(
         self, new_index: pd.MultiIndex, upsample_dt_ratio: float, method: str
     ) -> pd.DataFrame:
-        upsample_dt_factor: int = int(upsample_dt_ratio)
+        upsample_dt_factor: int = int(round(upsample_dt_ratio))
 
         interpolated_df: pd.DataFrame = pd.DataFrame(
             index=new_index, columns=self.scene_data_df.columns
@@ -338,9 +334,9 @@ class DataFrameCache(SceneCache):
             new_index.get_level_values("scene_ts") % upsample_dt_factor == 0
         )[0]
         interpolated_df.iloc[scene_data_idxs] = scene_data
-        interpolated_df.iloc[
-            scene_data_idxs, self.column_dict["heading"]
-        ] = unwrapped_heading
+        interpolated_df.iloc[scene_data_idxs, self.column_dict["heading"]] = (
+            unwrapped_heading
+        )
 
         # Interpolation.
         interpolated_df.interpolate(method=method, limit_area="inside", inplace=True)
@@ -355,7 +351,7 @@ class DataFrameCache(SceneCache):
     def _downsample_data(
         self, new_index: pd.MultiIndex, downsample_dt_ratio: float
     ) -> pd.DataFrame:
-        downsample_dt_factor: int = int(downsample_dt_ratio)
+        downsample_dt_factor: int = int(round(downsample_dt_ratio))
 
         subsample_index: pd.MultiIndex = new_index.set_levels(
             new_index.levels[1] * downsample_dt_factor, level=1
@@ -370,7 +366,8 @@ class DataFrameCache(SceneCache):
     def interpolate_data(self, desired_dt: float, method: str = "linear") -> None:
         upsample_dt_ratio: float = self.scene.env_metadata.dt / desired_dt
         downsample_dt_ratio: float = desired_dt / self.scene.env_metadata.dt
-        if not upsample_dt_ratio.is_integer() and not downsample_dt_ratio.is_integer():
+        
+        if not is_integer_robust(upsample_dt_ratio) and not is_integer_robust(downsample_dt_ratio):
             raise ValueError(
                 f"{str(self.scene)}'s dt of {self.scene.dt}s "
                 f"is not integer divisible by the desired dt {desired_dt}s."
@@ -705,23 +702,19 @@ class DataFrameCache(SceneCache):
 
     @staticmethod
     def get_map_paths(
-        cache_path: Path, env_name: str, map_name: str, resolution: float
-    ) -> Tuple[Path, Path, Path, Path, Path, Path]:
+        cache_path: Path, env_name: str, map_name: str
+    ) -> Tuple[Path, Path, Path, Path]:
         maps_path: Path = DataFrameCache.get_maps_path(cache_path, env_name)
 
         vector_map_path: Path = maps_path / f"{map_name}.pb"
         kdtrees_path: Path = maps_path / f"{map_name}_kdtrees.dill"
         rtrees_path: Path = maps_path / f"{map_name}_rtrees.dill"
-        raster_map_path: Path = maps_path / f"{map_name}_{resolution:.2f}px_m.zarr"
-        raster_metadata_path: Path = maps_path / f"{map_name}_{resolution:.2f}px_m.dill"
 
         return (
             maps_path,
             vector_map_path,
             kdtrees_path,
             rtrees_path,
-            raster_map_path,
-            raster_metadata_path,
         )
 
     @staticmethod
@@ -733,8 +726,6 @@ class DataFrameCache(SceneCache):
             vector_map_path,
             kdtrees_path,
             rtrees_path,
-            raster_map_path,
-            raster_metadata_path,
         ) = DataFrameCache.get_map_paths(cache_path, env_name, map_name, resolution)
 
         # TODO(bivanovic): For now, rtrees are optional to have in the cache.
@@ -745,8 +736,6 @@ class DataFrameCache(SceneCache):
             and vector_map_path.exists()
             and kdtrees_path.exists()
             # and rtrees_path.exists()
-            and raster_metadata_path.exists()
-            and raster_map_path.exists()
         )
 
     @staticmethod
@@ -755,22 +744,13 @@ class DataFrameCache(SceneCache):
         vector_map: VectorMap,
         map_params: Dict[str, Any],
     ) -> None:
-        raster_resolution: float = map_params["px_per_m"]
-
         (
             maps_path,
             vector_map_path,
             kdtrees_path,
             rtrees_path,
-            raster_map_path,
-            raster_metadata_path,
         ) = DataFrameCache.get_map_paths(
-            cache_path, vector_map.env_name, vector_map.map_name, raster_resolution
-        )
-
-        pbar_kwargs = {"position": 2, "leave": False, "disable": True}
-        rasterized_map: RasterizedMap = raster_utils.rasterize_map(
-            vector_map, raster_resolution, **pbar_kwargs
+            cache_path, vector_map.env_name, vector_map.map_name
         )
 
         vector_map.compute_search_indices()
@@ -790,13 +770,6 @@ class DataFrameCache(SceneCache):
         with open(rtrees_path, "wb") as f:
             dill.dump(vector_map.search_rtrees, f)
 
-        # Saving the rasterized map data.
-        zarr.save(raster_map_path, rasterized_map.data)
-
-        # Saving the rasterized map metadata.
-        with open(raster_metadata_path, "wb") as f:
-            dill.dump(rasterized_map.metadata, f)
-
     def pad_map_patch(
         self,
         patch: np.ndarray,
@@ -805,28 +778,7 @@ class DataFrameCache(SceneCache):
         patch_size: int,
         map_dims: Tuple[int, int, int],
     ) -> np.ndarray:
-        if patch.shape[-2:] == (patch_size, patch_size):
-            return patch
-
-        top, bot, left, right = patch_sides
-        channels, height, width = map_dims
-
-        # If we're off the map, just return zeros in the
-        # desired size of the patch.
-        if bot <= 0 or top >= height or right <= 0 or left >= width:
-            return np.zeros((channels, patch_size, patch_size))
-
-        pad_top, pad_bot, pad_left, pad_right = 0, 0, 0, 0
-        if top < 0:
-            pad_top = 0 - top
-        if bot >= height:
-            pad_bot = bot - height
-        if left < 0:
-            pad_left = 0 - left
-        if right >= width:
-            pad_right = right - width
-
-        return np.pad(patch, [(0, 0), (pad_top, pad_bot), (pad_left, pad_right)])
+        raise NotImplementedError()
 
     def load_kdtrees(self) -> Dict[str, MapElementKDTree]:
         _, _, kdtrees_path, _, _, _ = DataFrameCache.get_map_paths(
@@ -895,163 +847,3 @@ class DataFrameCache(SceneCache):
 
         else:
             return self._rtrees
-
-    def load_map_patch(
-        self,
-        world_x: float,
-        world_y: float,
-        desired_patch_size: int,
-        resolution: float,
-        offset_xy: Tuple[float, float],
-        agent_heading: float,
-        return_rgb: bool,
-        rot_pad_factor: float = 1.0,
-        no_map_val: float = 0.0,
-    ) -> Tuple[np.ndarray, np.ndarray, bool]:
-        (
-            maps_path,
-            _,
-            _,
-            _,
-            raster_map_path,
-            raster_metadata_path,
-        ) = DataFrameCache.get_map_paths(
-            self.path, self.scene.env_name, self.scene.location, resolution
-        )
-        if not maps_path.exists():
-            # This dataset (or location) does not have any maps,
-            # so we return an empty map.
-            patch_size: int = ceil((rot_pad_factor * desired_patch_size) / 2) * 2
-
-            return (
-                np.full(
-                    (1 if not return_rgb else 3, patch_size, patch_size),
-                    fill_value=no_map_val,
-                ),
-                np.eye(3),
-                False,
-            )
-
-        with open(raster_metadata_path, "rb") as f:
-            map_info: RasterizedMapMetadata = dill.load(f)
-
-        raster_from_world_tf: np.ndarray = map_info.map_from_world
-        map_coords: np.ndarray = map_info.map_from_world @ np.array(
-            [world_x, world_y, 1.0]
-        )
-        map_x, map_y = map_coords[0].item(), map_coords[1].item()
-
-        raster_from_world_tf = (
-            np.array(
-                [
-                    [1.0, 0.0, -map_x],
-                    [0.0, 1.0, -map_y],
-                    [0.0, 0.0, 1.0],
-                ]
-            )
-            @ raster_from_world_tf
-        )
-
-        # This first size is how much of the map we
-        # need to extract to match the requested metric size (meters x meters) of
-        # the patch.
-        data_patch_size: int = ceil(
-            desired_patch_size * map_info.resolution / resolution
-        )
-
-        # Incorporating offsets.
-        if offset_xy != (0.0, 0.0):
-            # x is negative here because I am moving the map
-            # center so that the agent ends up where the user wishes
-            # (the agent is pinned from the end user's perspective).
-            map_offset: Tuple[float, float] = (
-                -offset_xy[0] * data_patch_size // 2,
-                offset_xy[1] * data_patch_size // 2,
-            )
-
-            rotated_offset: np.ndarray = (
-                arr_utils.rotation_matrix(agent_heading) @ map_offset
-            )
-
-            off_x = rotated_offset[0]
-            off_y = rotated_offset[1]
-
-            map_x += off_x
-            map_y += off_y
-
-            raster_from_world_tf = (
-                np.array(
-                    [
-                        [1.0, 0.0, -off_x],
-                        [0.0, 1.0, -off_y],
-                        [0.0, 0.0, 1.0],
-                    ]
-                )
-                @ raster_from_world_tf
-            )
-
-        # This is the size of the patch taking into account expansion to allow for
-        # rotation to match the agent's heading. We also ensure the final size is
-        # divisible by two so that the // 2 below does not chop any information off.
-        data_with_rot_pad_size: int = ceil((rot_pad_factor * data_patch_size) / 2) * 2
-
-        disk_data = zarr.open_array(raster_map_path, mode="r")
-
-        map_x = round(map_x)
-        map_y = round(map_y)
-
-        # Half of the patch's side length.
-        half_extent: int = data_with_rot_pad_size // 2
-
-        top: int = map_y - half_extent
-        bot: int = map_y + half_extent
-        left: int = map_x - half_extent
-        right: int = map_x + half_extent
-
-        data_patch: np.ndarray = self.pad_map_patch(
-            disk_data[
-                ...,
-                max(top, 0) : min(bot, disk_data.shape[1]),
-                max(left, 0) : min(right, disk_data.shape[2]),
-            ],
-            (top, bot, left, right),
-            data_with_rot_pad_size,
-            disk_data.shape,
-        )
-
-        if return_rgb:
-            rgb_groups = map_info.layer_rgb_groups
-            data_patch = np.stack(
-                [
-                    np.amax(data_patch[rgb_groups[0]], axis=0),
-                    np.amax(data_patch[rgb_groups[1]], axis=0),
-                    np.amax(data_patch[rgb_groups[2]], axis=0),
-                ],
-            )
-
-        if desired_patch_size != data_patch_size:
-            scale_factor: float = desired_patch_size / data_patch_size
-            data_patch = (
-                kornia.geometry.rescale(
-                    torch.from_numpy(data_patch).unsqueeze(0),
-                    scale_factor,
-                    # Default align_corners value, just putting it to remove warnings
-                    align_corners=False,
-                    antialias=True,
-                )
-                .squeeze(0)
-                .numpy()
-            )
-
-            raster_from_world_tf = (
-                np.array(
-                    [
-                        [1 / scale_factor, 0.0, 0.0],
-                        [0.0, 1 / scale_factor, 0.0],
-                        [0.0, 0.0, 1.0],
-                    ]
-                )
-                @ raster_from_world_tf
-            )
-
-        return data_patch, raster_from_world_tf, True

@@ -26,7 +26,7 @@ class DataIndex:
         )
         self._len: int = self._cumulative_lengths[-1].item()
 
-        self._scene_paths: np.ndarray = np.array(scene_paths).astype(np.string_)
+        self._scene_paths: np.ndarray = np.array(scene_paths).astype(np.bytes_)
 
     def __len__(self) -> int:
         return self._len
@@ -61,7 +61,7 @@ class AgentDataIndex(DataIndex):
         ):
             agent_ids, agent_times = zip(*scene_data_index)
 
-            self._agent_ids.append(np.array(agent_ids).astype(np.string_))
+            self._agent_ids.append(np.array(agent_ids).astype(np.bytes_))
 
             agent_ts: np.ndarray = np.stack(agent_times)
             self._agent_times.append(agent_ts)

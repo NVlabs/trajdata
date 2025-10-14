@@ -29,6 +29,9 @@ message MapElement {
     RoadArea road_area = 3;
     PedCrosswalk ped_crosswalk = 4;
     PedWalkway ped_walkway = 5;
+    RoadEdge road_edge = 6;
+    TrafficSign traffic_sign = 7;
+    WaitLine wait_line = 8;
   }
 }
 
@@ -39,14 +42,14 @@ message Point {
 }
 
 message Polyline {
-  // Position deltas in millimeters. The origin is an arbitrary location.
-  // From https://github.com/woven-planet/l5kit/blob/master/l5kit/l5kit/data/proto/road_network.proto#L446
+  // Position deltas in 10^-5 meters. The origin is an arbitrary location.
+  // Inspired by https://github.com/woven-planet/l5kit/blob/master/l5kit/l5kit/data/proto/road_network.proto#L446
   // The delta for the first point is just its coordinates tuple, i.e. it is a "delta" from
   // the origin. For subsequent points, this field stores the difference between the point's
   // coordinates and the previous point's coordinates. This is for representation efficiency.
-  repeated sint32 dx_mm = 1;
-  repeated sint32 dy_mm = 2;
-  repeated sint32 dz_mm = 3;
+  repeated sint64 dx_mm = 1;
+  repeated sint64 dy_mm = 2;
+  repeated sint64 dz_mm = 3;
   repeated double h_rad = 4;
 }
 
@@ -74,6 +77,16 @@ message RoadLane {
   // A list of neighbors to the right of this lane. Neighbor lanes
   // include only adjacent lanes going the same direction.
   repeated bytes adjacent_lanes_right = 7;
+
+  // A list of associated road area ids.
+  repeated bytes road_area_ids = 8;
+
+  // A list of associated traffic sign ids.
+  repeated bytes traffic_sign_ids = 9;
+
+  // A list of associated wait line ids.
+  repeated bytes wait_line_ids = 10;
+
 }
 
 message RoadArea {
@@ -98,4 +111,26 @@ message PedWalkway {
   // The polygon is assumed to be closed (i.e. a segment exists between the last
   // point and the first point).
   Polyline polygon = 1;
+}
+
+message RoadEdge {
+  // The polyline data for the edge of the road. This is used to define the
+  // boundary of the road network.
+  Polyline polyline = 1;
+}
+
+message TrafficSign {
+  // Position of the traffic sign
+  Point position = 1;
+  // Type of the traffic sign
+  string sign_type = 2;
+}
+
+message WaitLine {
+  // The polyline data for the wait line
+  Polyline polyline = 1;
+  // Type of the wait line. e.g., stop line
+  string wait_line_type = 2;
+  // Is the waitline explicit or implicit
+  bool is_implicit = 3;
 }

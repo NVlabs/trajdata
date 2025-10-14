@@ -9,11 +9,6 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
         return NuscDataset(dataset_name, data_dir, parallelizable=False, has_maps=True)
 
-    if "vod" in dataset_name:
-        from trajdata.dataset_specific.vod import VODDataset
-
-        return VODDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
-
     if "lyft" in dataset_name:
         from trajdata.dataset_specific.lyft import LyftDataset
 
@@ -49,11 +44,6 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
         return InteractionDataset(
             dataset_name, data_dir, parallelizable=True, has_maps=True
         )
-
-    if "av2" in dataset_name:
-        from trajdata.dataset_specific.argoverse2 import Av2Dataset
-
-        return Av2Dataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 

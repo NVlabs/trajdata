@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from trajdata.maps.map_kdtree import MapElementKDTree, LaneCenterKDTree
+    from trajdata.maps.map_kdtree import (
+        MapElementKDTree,
+        LaneCenterKDTree,
+        RoadEdgeKDTree,
+    )
     from trajdata.maps.map_strtree import MapElementSTRTree
 
 from collections import defaultdict
@@ -24,11 +28,11 @@ from typing import (
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
-from tqdm import tqdm
-
 import trajdata.proto.vectorized_map_pb2 as map_proto
-from trajdata.maps.map_kdtree import LaneCenterKDTree
+from matplotlib.axes import Axes
+from shapely.geometry import Polygon
+from tqdm import tqdm
+from trajdata.maps.map_kdtree import LaneCenterKDTree, RoadAreaKDTree, RoadEdgeKDTree
 from trajdata.maps.map_strtree import MapElementSTRTree
 from trajdata.maps.traffic_light_status import TrafficLightStatus
 from trajdata.maps.vec_map_elements import (
@@ -38,23 +42,27 @@ from trajdata.maps.vec_map_elements import (
     PedWalkway,
     Polyline,
     RoadArea,
+    RoadEdge,
     RoadLane,
+    TrafficSign,
+    WaitLine,
 )
-from trajdata.utils import map_utils, raster_utils
+from trajdata.utils import map_utils
 
 
 @dataclass(repr=False)
 class VectorMap:
     map_id: str
-    extent: Optional[
-        np.ndarray
-    ] = None  # extent is [min_x, min_y, min_z, max_x, max_y, max_z]
+    extent: Optional[np.ndarray] = (
+        None  # extent is [min_x, min_y, min_z, max_x, max_y, max_z]
+    )
     elements: DefaultDict[MapElementType, Dict[str, MapElement]] = field(
         default_factory=lambda: defaultdict(dict)
     )
     search_kdtrees: Optional[Dict[MapElementType, MapElementKDTree]] = None
     search_rtrees: Optional[Dict[MapElementType, MapElementSTRTree]] = None
     traffic_light_status: Optional[Dict[Tuple[str, int], TrafficLightStatus]] = None
+    online_metadict: Optional[Dict[Tuple[str, int], Dict]] = None
 
     def __post_init__(self) -> None:
         self.env_name, self.map_name = self.map_id.split(":")
@@ -62,13 +70,22 @@ class VectorMap:
         self.lanes: Optional[List[RoadLane]] = None
         if MapElementType.ROAD_LANE in self.elements:
             self.lanes = list(self.elements[MapElementType.ROAD_LANE].values())
+        self.road_edges: Optional[List[RoadEdge]] = None
+        if MapElementType.ROAD_EDGE in self.elements:
+            self.road_edges = list(self.elements[MapElementType.ROAD_EDGE].values())
 
     def add_map_element(self, map_elem: MapElement) -> None:
         self.elements[map_elem.elem_type][map_elem.id] = map_elem
 
     def compute_search_indices(self) -> None:
         # TODO(bivanovic@nvidia.com): merge tree dicts?
-        self.search_kdtrees = {MapElementType.ROAD_LANE: LaneCenterKDTree(self)}
+        self.search_kdtrees = {
+            MapElementType.ROAD_LANE: LaneCenterKDTree(self),
+        }
+        if MapElementType.ROAD_EDGE in self.elements:
+            self.search_kdtrees[MapElementType.ROAD_EDGE] = RoadEdgeKDTree(self)
+        if MapElementType.ROAD_AREA in self.elements:
+            self.search_kdtrees[MapElementType.ROAD_AREA] = RoadAreaKDTree(self)
         self.search_rtrees = {
             elem_type: MapElementSTRTree(self, elem_type)
             for elem_type in [
@@ -85,6 +102,9 @@ class VectorMap:
 
     def get_road_lane(self, lane_id: str) -> RoadLane:
         return self.elements[MapElementType.ROAD_LANE][lane_id]
+
+    def get_road_edge(self, lane_id: str) -> RoadEdge:
+        return self.elements[MapElementType.ROAD_EDGE][lane_id]
 
     def __len__(self) -> int:
         return sum(len(elems_dict) for elems_dict in self.elements.values())
@@ -137,6 +157,45 @@ class VectorMap:
                     hole.xyz,
                     shifted_origin,
                 )
+
+    def _write_road_edges(
+        self, vectorized_map: map_proto.VectorizedMap, shifted_origin: np.ndarray
+    ) -> None:
+        road_edge: RoadEdge
+        for elem_id, road_edge in self.elements[MapElementType.ROAD_EDGE].items():
+            new_element: map_proto.MapElement = vectorized_map.elements.add()
+            new_element.id = elem_id.encode()
+
+            new_edge: map_proto.RoadEdge = new_element.road_edge
+            map_utils.populate_road_edge_polylines(new_edge, road_edge, shifted_origin)
+            
+    def _write_traffic_signs(
+        self, vectorized_map: map_proto.VectorizedMap, shifted_origin: np.ndarray
+    ) -> None:
+        traffic_sign: TrafficSign
+        for elem_id, traffic_sign in self.elements[MapElementType.TRAFFIC_SIGN].items():
+            new_element: map_proto.MapElement = vectorized_map.elements.add()
+            new_element.id = elem_id.encode()
+
+            new_traffic_sign: map_proto.TrafficSign = new_element.traffic_sign
+            shifted_position: np.ndarray = traffic_sign.position - shifted_origin
+            new_traffic_sign.position.x = shifted_position[0]
+            new_traffic_sign.position.y = shifted_position[1]
+            new_traffic_sign.position.z = shifted_position[2]
+            new_traffic_sign.sign_type = traffic_sign.sign_type.encode()
+    
+    def _write_wait_lines(
+        self, vectorized_map: map_proto.VectorizedMap, shifted_origin: np.ndarray
+    ) -> None:
+        wait_line: WaitLine
+        for elem_id, wait_line in self.elements[MapElementType.WAIT_LINE].items():
+            new_element: map_proto.MapElement = vectorized_map.elements.add()
+            new_element.id = elem_id.encode()
+
+            new_wait_line: map_proto.WaitLine = new_element.wait_line
+            map_utils.populate_polygon(new_wait_line.polyline, wait_line.polyline.xyz, shifted_origin)
+            new_wait_line.wait_line_type = wait_line.wait_line_type.encode()
+            new_wait_line.is_implicit = wait_line.is_implicit
 
     def _write_ped_crosswalks(
         self, vectorized_map: map_proto.VectorizedMap, shifted_origin: np.ndarray
@@ -195,6 +254,9 @@ class VectorMap:
         self._write_road_areas(output_map, shifted_origin)
         self._write_ped_crosswalks(output_map, shifted_origin)
         self._write_ped_walkways(output_map, shifted_origin)
+        self._write_road_edges(output_map, shifted_origin)
+        self._write_traffic_signs(output_map, shifted_origin)
+        self._write_wait_lines(output_map, shifted_origin)
 
         return output_map
 
@@ -205,6 +267,9 @@ class VectorMap:
         incl_road_areas: bool = kwargs.get("incl_road_areas", False)
         incl_ped_crosswalks: bool = kwargs.get("incl_ped_crosswalks", False)
         incl_ped_walkways: bool = kwargs.get("incl_ped_walkways", False)
+        incl_road_edges: bool = kwargs.get("incl_road_edges", False)
+        incl_traffic_signs: bool = kwargs.get("incl_traffic_signs", False)
+        incl_wait_lines: bool = kwargs.get("incl_wait_lines", False)
 
         # Add any map offset in case the map origin was shifted for storage efficiency.
         shifted_origin: np.ndarray = np.array(
@@ -248,6 +313,19 @@ class VectorMap:
                         )
                         + shifted_origin[:3]
                     )
+                    
+                traffic_sign_ids: Optional[Set[str]] = None
+                if len(road_lane_obj.traffic_sign_ids) > 0:
+                    traffic_sign_ids = set(
+                        [iden.decode() for iden in road_lane_obj.traffic_sign_ids]
+                    )
+                
+                wait_line_ids: Optional[Set[str]] = None
+                if len(road_lane_obj.wait_line_ids) > 0:
+                    wait_line_ids = set(
+                        [iden.decode() for iden in road_lane_obj.wait_line_ids]
+                    )
+                
 
                 adj_lanes_left: Set[str] = set(
                     [iden.decode() for iden in road_lane_obj.adjacent_lanes_left]
@@ -270,6 +348,8 @@ class VectorMap:
                     center_pl,
                     left_pl,
                     right_pl,
+                    traffic_sign_ids,
+                    wait_line_ids,
                     adj_lanes_left,
                     adj_lanes_right,
                     next_lanes,
@@ -321,6 +401,42 @@ class VectorMap:
 
                 curr_area = PedWalkway(elem_id, polygon_vertices)
                 map_elem_dict[MapElementType.PED_WALKWAY][elem_id] = curr_area
+
+            elif incl_road_edges and map_elem.HasField("road_edge"):
+                road_edge_obj: map_proto.RoadEdge = map_elem.road_edge
+
+                polyline: Polyline = Polyline(
+                    map_utils.proto_to_np(road_edge_obj.polyline) + shifted_origin
+                )
+
+                curr_edge = RoadEdge(elem_id, polyline)
+                map_elem_dict[MapElementType.ROAD_EDGE][elem_id] = curr_edge
+            
+            elif incl_traffic_signs and map_elem.HasField("traffic_sign"):
+                traffic_sign_obj: map_proto.TrafficSign = map_elem.traffic_sign
+
+                position: np.ndarray = np.array(
+                    [traffic_sign_obj.position.x,
+                     traffic_sign_obj.position.y,
+                     traffic_sign_obj.position.z,]
+                ) + shifted_origin[:3]
+
+                curr_traffic_sign = TrafficSign(
+                    elem_id, position, traffic_sign_obj.sign_type
+                )
+                map_elem_dict[MapElementType.TRAFFIC_SIGN][elem_id] = curr_traffic_sign
+            
+            elif incl_wait_lines and map_elem.HasField("wait_line"):
+                wait_line_obj: map_proto.WaitLine = map_elem.wait_line
+
+                polyline: Polyline = Polyline(
+                    map_utils.proto_to_np(wait_line_obj.polyline, incl_heading=False) + shifted_origin[:3]
+                )
+
+                curr_wait_line = WaitLine(
+                    elem_id, polyline, wait_line_obj.wait_line_type, wait_line_obj.is_implicit
+                )
+                map_elem_dict[MapElementType.WAIT_LINE][elem_id] = curr_wait_line
 
         return cls(
             map_id=vec_map.name,
@@ -375,6 +491,13 @@ class VectorMap:
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return self.lanes[lane_kdtree.closest_polyline_ind(xyz)]
 
+    def get_closest_road_edge(self, xyz: np.ndarray) -> RoadLane:
+        assert (
+            self.search_kdtrees is not None
+        ), "Search KDTree not found, please rebuild cache."
+        road_edge_kdtree: RoadEdgeKDTree = self.search_kdtrees[MapElementType.ROAD_EDGE]
+        return self.road_edges[road_edge_kdtree.closest_polyline_ind(xyz)]
+
     def get_closest_unique_lanes(self, xyz_vec: np.ndarray) -> List[RoadLane]:
         assert (
             self.search_kdtrees is not None
@@ -392,6 +515,16 @@ class VectorMap:
         lane_kdtree: LaneCenterKDTree = self.search_kdtrees[MapElementType.ROAD_LANE]
         return [
             self.lanes[idx] for idx in lane_kdtree.polyline_inds_in_range(xyz, dist)
+        ]
+
+    def get_road_edges_within(self, xyz: np.ndarray, dist: float) -> List[RoadEdge]:
+        assert (
+            self.search_kdtrees is not None
+        ), "Search KDTree not found, please rebuild cache."
+        road_edge_kdtree: RoadEdgeKDTree = self.search_kdtrees[MapElementType.ROAD_EDGE]
+        return [
+            self.road_edges[idx]
+            for idx in road_edge_kdtree.polyline_inds_in_range(xyz, dist)
         ]
 
     def get_closest_area(
@@ -435,6 +568,31 @@ class VectorMap:
         )
         return [self.elements[elem_type][id] for id in ids]
 
+    def get_road_areas_within(self, xyz: np.ndarray, dist: float) -> List[RoadArea]:
+        road_area_kdtree: RoadAreaKDTree = self.search_kdtrees[MapElementType.ROAD_AREA]
+        polyline_inds = road_area_kdtree.polyline_inds_in_range(xyz, dist)
+        element_ids = set(
+            [road_area_kdtree.metadata["map_elem_id"][ind] for ind in polyline_inds]
+        )
+        if MapElementType.ROAD_AREA not in self.elements:
+            raise ValueError(
+                "Road areas are not loaded. Use map_api.get_map(..., incl_road_areas=True)."
+            )
+        return [self.elements[MapElementType.ROAD_AREA][id] for id in element_ids]
+
+    def get_road_area_polygon_2d(self, id: str) -> Polygon:
+        if id not in self._road_area_polygons:
+            road_area: RoadArea = self.elements[MapElementType.ROAD_AREA][id]
+            road_area_polygon = Polygon(
+                shell=[(pt[0], pt[1]) for pt in road_area.exterior_polygon.points],
+                holes=[
+                    [(pt[0], pt[1]) for pt in polyline.points]
+                    for polyline in road_area.interior_holes
+                ],
+            )
+            self._road_area_polygons[id] = road_area_polygon
+        return self._road_area_polygons[id]
+
     def get_traffic_light_status(
         self, lane_id: str, scene_ts: int
     ) -> TrafficLightStatus:
@@ -444,6 +602,91 @@ class VectorMap:
             )
             if self.traffic_light_status is not None
             else TrafficLightStatus.NO_DATA
+        )
+        
+    def has_stop_sign(
+        self, lane_id: str
+    ) -> bool:
+        traffic_sign_ids = self.get_road_lane(lane_id).traffic_sign_ids
+        if traffic_sign_ids is not None:
+            for sign_id in traffic_sign_ids:
+                if self.elements[MapElementType.TRAFFIC_SIGN][sign_id].sign_type == "TRAFFIC_SIGN_REGULATORY_R1_STOP":
+                    return True
+        return False
+
+    def get_wait_lines(self, lane_id: str) -> List[WaitLine]:
+        # Get waitlines for a lane
+        wait_line_ids = self.get_road_lane(lane_id).wait_line_ids
+        wait_lines: List[WaitLine] = []
+        if wait_line_ids is not None:
+            wait_lines: List[WaitLine] = [
+                self.elements[MapElementType.WAIT_LINE][wait_line_id]
+                for wait_line_id in wait_line_ids
+            ]
+        return wait_lines
+
+    def get_traffic_signs(self, lane_id: str) -> List[TrafficSign]:
+        # Get traffic signs for a lane
+        traffic_sign_ids = self.get_road_lane(lane_id).traffic_sign_ids
+        traffic_signs: List[TrafficSign] = []
+        if traffic_sign_ids is not None:
+            traffic_signs: List[TrafficSign] = [
+                self.elements[MapElementType.TRAFFIC_SIGN][traffic_sign_id]
+                for traffic_sign_id in traffic_sign_ids
+            ]
+
+        return traffic_signs
+
+    def associate_traffic_sign_with_wait_line(self, lane_id: str) -> List[Tuple[TrafficSign, WaitLine]]:
+        """Associate traffic signs with wait lines for a lane using nearest distance.
+
+        Args:
+            lane_id (str): lane id
+
+        Returns:
+            List[Tuple[TrafficSign, WaitLine]]: List of (traffic_sign, wait_line) tuples that are associated.
+        """
+
+        # Get waitlines and traffic signs
+        wait_lines: List[WaitLine] = self.get_wait_lines(lane_id)
+        traffic_signs: List[TrafficSign] = self.get_traffic_signs(lane_id)
+
+        # Associate traffic signs with wait lines
+        traffic_sign_wait_line_associations: List[Tuple[TrafficSign, WaitLine]] = []
+        for traffic_sign in traffic_signs:
+            smallest_distance_to_wait_line = np.inf
+            nearest_wait_line = None
+            for wait_line in wait_lines:
+                distance_to_wait_line = wait_line.polyline.distance_to_point(
+                    traffic_sign.position[None,:]
+                )
+                if distance_to_wait_line < smallest_distance_to_wait_line:
+                    smallest_distance_to_wait_line = distance_to_wait_line
+                    nearest_wait_line = wait_line
+            if nearest_wait_line is not None:
+                traffic_sign_wait_line_associations.append(
+                    (traffic_sign, nearest_wait_line)
+                )
+        return traffic_sign_wait_line_associations
+
+    def is_stop_sign(self, traffic_sign: TrafficSign) -> bool:
+        if traffic_sign.sign_type == "TRAFFIC_SIGN_REGULATORY_R1_STOP":
+            return True
+        return False
+    
+    def get_wait_line(
+        self, lane_id: str
+    ) -> Optional[WaitLine]:
+        wait_line_ids = self.get_road_lane(lane_id).wait_line_ids
+        if len(wait_line_ids) == 0:
+            return None
+        return self.elements[MapElementType.WAIT_LINE][wait_line_ids.pop()]
+
+    def get_online_metadict(self, lane_id: str, scene_ts: int = 0) -> Dict:
+        return (
+            self.online_metadict[(str(lane_id), scene_ts)]
+            if self.online_metadict is not None
+            else {}
         )
 
     def rasterize(
@@ -457,110 +700,7 @@ class VectorMap:
         Returns:
             np.ndarray: The rasterized RGB image.
         """
-        return_tf_mat: bool = kwargs.get("return_tf_mat", False)
-        incl_centerlines: bool = kwargs.get("incl_centerlines", True)
-        incl_lane_edges: bool = kwargs.get("incl_lane_edges", True)
-        incl_lane_area: bool = kwargs.get("incl_lane_area", True)
-
-        scene_ts: Optional[int] = kwargs.get("scene_ts", None)
-
-        # (255, 102, 99) also looks nice.
-        center_color: Tuple[int, int, int] = kwargs.get("center_color", (129, 51, 255))
-        # (86, 203, 249) also looks nice.
-        edge_color: Tuple[int, int, int] = kwargs.get("edge_color", (118, 185, 0))
-        # (191, 215, 234) also looks nice.
-        area_color: Tuple[int, int, int] = kwargs.get("area_color", (214, 232, 181))
-
-        min_x, min_y, _, max_x, max_y, _ = self.extent
-
-        world_center_m: Tuple[float, float] = (
-            (max_x + min_x) / 2,
-            (max_y + min_y) / 2,
-        )
-
-        raster_size_x: int = ceil((max_x - min_x) * resolution)
-        raster_size_y: int = ceil((max_y - min_y) * resolution)
-
-        raster_from_local: np.ndarray = np.array(
-            [
-                [resolution, 0, raster_size_x / 2],
-                [0, resolution, raster_size_y / 2],
-                [0, 0, 1],
-            ]
-        )
-
-        # Compute pose from its position and rotation.
-        pose_from_world: np.ndarray = np.array(
-            [
-                [1, 0, -world_center_m[0]],
-                [0, 1, -world_center_m[1]],
-                [0, 0, 1],
-            ]
-        )
-
-        raster_from_world: np.ndarray = raster_from_local @ pose_from_world
-
-        map_img: np.ndarray = np.zeros(
-            shape=(raster_size_y, raster_size_x, 3), dtype=np.uint8
-        )
-
-        lane_edges: List[np.ndarray] = list()
-        centerlines: List[np.ndarray] = list()
-        lane: RoadLane
-        for lane in tqdm(
-            self.elements[MapElementType.ROAD_LANE].values(),
-            desc=f"Rasterizing Map at {resolution:.2f} px/m",
-            leave=False,
-        ):
-            centerlines.append(
-                raster_utils.world_to_subpixel(
-                    lane.center.points[:, :2], raster_from_world
-                )
-            )
-            if lane.left_edge is not None and lane.right_edge is not None:
-                left_pts: np.ndarray = lane.left_edge.points[:, :2]
-                right_pts: np.ndarray = lane.right_edge.points[:, :2]
-
-                lane_edges += [
-                    raster_utils.world_to_subpixel(left_pts, raster_from_world),
-                    raster_utils.world_to_subpixel(right_pts, raster_from_world),
-                ]
-
-                lane_color = area_color
-                status = self.get_traffic_light_status(lane.id, scene_ts)
-                if status == TrafficLightStatus.GREEN:
-                    lane_color = [0, 200, 0]
-                elif status == TrafficLightStatus.RED:
-                    lane_color = [200, 0, 0]
-                elif status == TrafficLightStatus.UNKNOWN:
-                    lane_color = [150, 150, 0]
-
-                # Drawing lane areas. Need to do per loop because doing it all at once can
-                # create lots of wonky holes in the image.
-                # See https://stackoverflow.com/questions/69768620/cv2-fillpoly-failing-for-intersecting-polygons
-                if incl_lane_area:
-                    lane_area: np.ndarray = np.concatenate(
-                        [left_pts, right_pts[::-1]], axis=0
-                    )
-                    raster_utils.rasterize_world_polygon(
-                        lane_area,
-                        map_img,
-                        raster_from_world,
-                        color=lane_color,
-                    )
-
-        # Drawing all lane edge lines at the same time.
-        if incl_lane_edges:
-            raster_utils.cv2_draw_polylines(lane_edges, map_img, color=edge_color)
-
-        # Drawing centerlines last (on top of everything else).
-        if incl_centerlines:
-            raster_utils.cv2_draw_polylines(centerlines, map_img, color=center_color)
-
-        if return_tf_mat:
-            return map_img.astype(float) / 255, raster_from_world
-        else:
-            return map_img.astype(float) / 255
+        raise NotImplementedError()
 
     @overload
     def visualize_lane_graph(
@@ -568,16 +708,17 @@ class VectorMap:
         origin_lane: RoadLane,
         num_hops: int,
         **kwargs,
-    ) -> Axes:
-        ...
+    ) -> Axes: ...
 
     @overload
-    def visualize_lane_graph(self, origin_lane: str, num_hops: int, **kwargs) -> Axes:
-        ...
+    def visualize_lane_graph(
+        self, origin_lane: str, num_hops: int, **kwargs
+    ) -> Axes: ...
 
     @overload
-    def visualize_lane_graph(self, origin_lane: int, num_hops: int, **kwargs) -> Axes:
-        ...
+    def visualize_lane_graph(
+        self, origin_lane: int, num_hops: int, **kwargs
+    ) -> Axes: ...
 
     def visualize_lane_graph(
         self, origin_lane: Union[RoadLane, str, int], num_hops: int, **kwargs
@@ -646,3 +787,53 @@ class VectorMap:
             ax.legend(loc="best", frameon=True)
 
         return ax
+
+
+def split_lane_segments(lane, n=None, max_len=None):
+    if n is None:
+        length = np.linalg.norm(lane.center.xy[1:] - lane.center.xy[:-1], axis=-1).sum()
+        n = ceil(length / max_len)
+    if n == 1:
+        return [lane]
+    idx = np.linspace(0, lane.center.xy.shape[0] - 1, n + 1).astype(int)
+    left_idx = (
+        np.linspace(0, lane.left_edge.xy.shape[0] - 1, n + 1).astype(int)
+        if lane.left_edge is not None
+        else None
+    )
+    right_idx = (
+        np.linspace(0, lane.right_edge.xy.shape[0] - 1, n + 1).astype(int)
+        if lane.right_edge is not None
+        else None
+    )
+
+    split_lanes = list()
+    for i in range(n):
+        center = Polyline(points=lane.center.points[idx[i] : idx[i + 1] + 1])
+        left_edge = (
+            Polyline(lane.left_edge.points[left_idx[i] : left_idx[i + 1] + 1])
+            if lane.left_edge is not None
+            else None
+        )
+        right_edge = (
+            Polyline(lane.right_edge.points[right_idx[i] : right_idx[i + 1] + 1])
+            if lane.right_edge is not None
+            else None
+        )
+
+        new_lane = RoadLane(
+            center=center,
+            left_edge=left_edge,
+            right_edge=right_edge,
+            adj_lanes_left=lane.adj_lanes_left,
+            adj_lanes_right=lane.adj_lanes_right,
+            next_lanes=lane.next_lanes if i == n - 1 else set(),
+            prev_lanes=lane.prev_lanes if i == 0 else {split_lanes[i - 1].id},
+            road_area_ids=lane.road_area_ids,
+            elem_type=lane.elem_type,
+            id=lane.id + f"_{i}",
+        )
+        if i > 0:
+            split_lanes[i - 1].next_lanes = {new_lane.id}
+        split_lanes.append(new_lane)
+    return split_lanes
