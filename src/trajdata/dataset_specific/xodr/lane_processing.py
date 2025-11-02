@@ -6,7 +6,6 @@ calculations, edge computations, and artificial edge creation.
 
 from __future__ import annotations
 
-import math
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple
 
@@ -243,15 +242,31 @@ def _process_lane_geometry(
         max_xyz: Maximum extent (updated in place)
     """
     # Process left side (positive IDs) and right side (negative IDs) separately
-    for side_ids in [
-        sorted([lid for lid, _ in lane_offsets if lid > 0]),
-        sorted([lid for lid, _ in lane_offsets if lid < 0], reverse=True),
-    ]:
-        # Start from road centerline
-        current_edge_x, current_edge_y = center_x.copy(), center_y.copy()
+    # Both are processed from inside out (centerline -> outer edge)
+    left_lane_ids = sorted([lid for lid, _ in lane_offsets if lid > 0])  # [1, 2, 3...]
+    right_lane_ids = sorted([lid for lid, _ in lane_offsets if lid < 0], reverse=True)  # [-1, -2, -3...]
+    
+    for is_left_side, side_ids in [(True, left_lane_ids), (False, right_lane_ids)]:
+        if is_left_side:
+            # For left lanes, start from reversed centerline since they flow opposite
+            current_edge_x = center_x[::-1]
+            current_edge_y = center_y[::-1]
+            current_center_z = center_z[::-1]
+            current_road_headings = road_headings[::-1]
+        else:
+            # For right lanes, use normal centerline
+            current_edge_x = center_x.copy()
+            current_edge_y = center_y.copy()
+            current_center_z = center_z.copy()
+            current_road_headings = road_headings.copy()
 
         for lid in side_ids:
-            widths = lane_width_samples[lid]
+            if is_left_side:
+                # For left lanes, reverse the width array to match reversed geometry
+                widths = lane_width_samples[lid][::-1]
+            else:
+                widths = lane_width_samples[lid]
+
             lane_type = lane_types.get(lid, "none")
             lane_direction = lane_directions.get(lid, "standard")
             is_driving = lane_type in DRIVEABLE_LANE_TYPES
@@ -265,8 +280,8 @@ def _process_lane_geometry(
                 sign,
                 current_edge_x,
                 current_edge_y,
-                center_z,
-                road_headings,
+                current_center_z,
+                current_road_headings,
                 lane_type,
                 lane_direction,
                 is_driving,
@@ -297,7 +312,7 @@ def _process_lane_geometry(
 
             # Update edge for next iteration (move to outer edge)
             outer_edge_x, outer_edge_y = compute_polyline_from_width(
-                current_edge_x, current_edge_y, widths, sign, road_headings
+                current_edge_x, current_edge_y, widths, sign, current_road_headings
             )
             current_edge_x, current_edge_y = outer_edge_x, outer_edge_y
 
@@ -324,6 +339,7 @@ def _create_single_lane_geometry(
         sign: 1 for left lanes, -1 for right lanes
         current_edge_x: X coordinates of the inner edge
         current_edge_y: Y coordinates of the inner edge
+        center_z: Z coordinates along the lane
         road_headings: Heading angles along the road
         lane_type: Lane type from XODR
         lane_direction: Lane direction from XODR ("standard", "reversed", or "both")
@@ -345,18 +361,15 @@ def _create_single_lane_geometry(
 
     # Build 3D coordinates using actual elevation data
     xyz_center = np.stack([mid_x, mid_y, center_z], axis=1)
-
-    if lane_id > 0:  # Left lane
-        xyz_left = np.stack([outer_edge_x, outer_edge_y, center_z], axis=1)
-        xyz_right = np.stack([current_edge_x, current_edge_y, center_z], axis=1)
-    else:  # Right lane
-        xyz_left = np.stack([current_edge_x, current_edge_y, center_z], axis=1)
-        xyz_right = np.stack([outer_edge_x, outer_edge_y, center_z], axis=1)
+    
+    # Assign edges
+    # For right lanes: current edge is inner (left), outer edge is outer (right)
+    # For left lanes: with pre-reversed geometry, we use the same assignment
+    xyz_left = np.stack([current_edge_x, current_edge_y, center_z], axis=1)
+    xyz_right = np.stack([outer_edge_x, outer_edge_y, center_z], axis=1)
 
     # Compute lane headings from actual lane centerline
     lane_headings = recompute_headings(mid_x, mid_y)
-    if lane_id > 0:  # Left lane - add π
-        lane_headings = (lane_headings + math.pi) % (2 * math.pi) - math.pi
 
     return LaneGeom(
         lane_id_xml=lane_id,

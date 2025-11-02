@@ -13,7 +13,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 name = "trajdata-alpasim"
-version = "1.4.2"
+version = "1.4.3"
 authors = [{ name = "Boris Ivanovic", email = "bivanovic@nvidia.com" }]
 description = "A unified interface to many trajectory forecasting datasets."
 readme = "README.md"
