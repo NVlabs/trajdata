@@ -17,8 +17,8 @@ import numpy as np
 
 from .connectivity import (
     build_lane_adjacency,
-    connect_lanes_between_roads,
     extract_road_connections,
+    parse_lane_successors_predecessors,
     process_junction_connections,
 )
 from .datatypes import LaneGeom, ParsedXodr
@@ -84,7 +84,9 @@ def parse_xodr(xodr_str: str, resolution: float = 0.5) -> ParsedXodr:
 
     # Extract and apply road-to-road connectivity
     road_connections = extract_road_connections(root)
-    connect_lanes_between_roads(root, road_connections, road_to_lanes)
+
+    # Parse lane-level successor/predecessor connections
+    parse_lane_successors_predecessors(root, lane_geoms, road_connections)
 
     # Process explicit junction connections
     process_junction_connections(root, lane_geoms)
@@ -266,11 +268,19 @@ def _parse_neighbor_lanes(root: ET.Element, lane_geoms: Dict[str, LaneGeom]) -> 
                     if left_elem is not None:
                         neighbor_id = left_elem.attrib.get("id")
                         if neighbor_id:
-                            lg.left_neighbor_forward.add(f"{road_id}_{neighbor_id}")
+                            direction = left_elem.attrib.get("direction", "forward")
+                            if direction == "forward":
+                                lg.left_neighbor_forward.add(f"{road_id}_{neighbor_id}")
+                            elif direction == "backward":
+                                lg.left_neighbor_backward.add(f"{road_id}_{neighbor_id}")
 
                     # Right neighbor
                     right_elem = link_elem.find("right")
                     if right_elem is not None:
                         neighbor_id = right_elem.attrib.get("id")
                         if neighbor_id:
-                            lg.right_neighbor_forward.add(f"{road_id}_{neighbor_id}")
+                            direction = right_elem.attrib.get("direction", "forward")
+                            if direction == "forward":
+                                lg.right_neighbor_forward.add(f"{road_id}_{neighbor_id}")
+                            elif direction == "backward":
+                                lg.right_neighbor_backward.add(f"{road_id}_{neighbor_id}")
