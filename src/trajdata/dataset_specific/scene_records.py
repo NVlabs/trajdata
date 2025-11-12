@@ -1,6 +1,12 @@
 from typing import NamedTuple
 
 
+class HighDRecord(NamedTuple):
+    data_idx: int
+    length: int
+    location: str
+
+
 class Argoverse2Record(NamedTuple):
     name: str
     data_idx: int

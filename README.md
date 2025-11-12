@@ -121,6 +121,7 @@ Currently, the dataloader supports interfacing with the following datasets:
 | UCY - Zara1 | `eupeds_zara1` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The Zara1 scene from the UCY Pedestrians dataset | 0.4s (2.5Hz) | |
 | UCY - Zara2 | `eupeds_zara2` | `train`, `val`, `train_loo`, `val_loo`, `test_loo` | `cyprus` | The Zara2 scene from the UCY Pedestrians dataset | 0.4s (2.5Hz) | |
 | Stanford Drone Dataset | `sdd` | `train`, `val`, `test` | `stanford` | Stanford Drone Dataset (60 scenes, randomly split 42/9/9 (70%/15%/15%) for training/validation/test) | 0.0333...s (30Hz) | |
+| highD | `highD` | `all` | N/A | Traffic recordings for more than 110 500 vehicles | 0.04s (25Hz) | :white_check_mark: |
 
 ### Adding New Datasets
 The code that interfaces the original datasets (dealing with their unique formats) can be found in `src/trajdata/dataset_specific`.
