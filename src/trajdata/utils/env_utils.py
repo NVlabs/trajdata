@@ -1,9 +1,25 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from trajdata.dataset_specific import RawDataset
 
 
-def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
+def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDataset:
+    """
+    Get a RawDataset instance for the specified dataset.
+
+    Args:
+        dataset_name: Name of the dataset (e.g., "nuplan_mini", "usdz")
+        data_dir: Path to the dataset directory
+        **dataset_kwargs: Dataset-specific keyword arguments.
+                         For example, Nuplan accepts: central_tokens_config, yaml_config_path,
+                         num_timesteps_before, num_timesteps_after, use_central_tokens
+
+    Returns:
+        RawDataset instance for the specified dataset
+
+    Raises:
+        ValueError: If the dataset name is not supported
+    """
     if "nusc" in dataset_name:
         from trajdata.dataset_specific.nusc import NuscDataset
 
@@ -31,7 +47,9 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
     if "nuplan" in dataset_name:
         from trajdata.dataset_specific.nuplan import NuplanDataset
 
-        return NuplanDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
+        return NuplanDataset(
+            dataset_name, data_dir, parallelizable=True, has_maps=True, **dataset_kwargs
+        )
 
     if "waymo" in dataset_name:
         from trajdata.dataset_specific.waymo import WaymoDataset
@@ -46,16 +64,28 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
         )
     if "mads" in dataset_name.lower():
         from trajdata.dataset_specific.mads import MADSDataset
-        
+
         return MADSDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 
-def get_raw_datasets(data_dirs: Dict[str, str]) -> List[RawDataset]:
+def get_raw_datasets(
+    data_dirs: Dict[str, str], **dataset_kwargs
+) -> List[RawDataset]:
+    """
+    Get RawDataset instances for multiple datasets.
+
+    Args:
+        data_dirs: Dictionary mapping dataset names to their data directories
+        **dataset_kwargs: Dataset-specific keyword arguments passed to each dataset
+
+    Returns:
+        List of RawDataset instances
+    """
     raw_datasets: List[RawDataset] = list()
 
     for dataset_name, data_dir in data_dirs.items():
-        raw_datasets.append(get_raw_dataset(dataset_name, data_dir))
+        raw_datasets.append(get_raw_dataset(dataset_name, data_dir, **dataset_kwargs))
 
     return raw_datasets

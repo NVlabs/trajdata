@@ -100,6 +100,7 @@ class UnifiedDataset(Dataset):
         max_agent_num: Optional[int] = None,
         max_neighbor_num: Optional[int] = None,
         ego_only: Optional[bool] = False,
+        dataset_kwargs: Optional[Dict[str, Any]] = None,
         data_dirs: Dict[str, str] = {
             "eupeds_eth": "~/datasets/eth_ucy_peds",
             "eupeds_hotel": "~/datasets/eth_ucy_peds",
@@ -258,7 +259,11 @@ class UnifiedDataset(Dataset):
                 s.lower() for s in self.scene_description_contains
             ]
 
-        self.envs: List[RawDataset] = env_utils.get_raw_datasets(data_dirs)
+        # Pass dataset-specific kwargs to raw datasets
+        dataset_kwargs = dataset_kwargs or {}
+        self.envs: List[RawDataset] = env_utils.get_raw_datasets(
+            data_dirs, **dataset_kwargs
+        )
         self.envs_dict: Dict[str, RawDataset] = {env.name: env for env in self.envs}
 
         matching_datasets: List[SceneTag] = self._get_matching_scene_tags(desired_data)
@@ -273,7 +278,7 @@ class UnifiedDataset(Dataset):
         if self.incl_vector_map:
             self._map_api = MapAPI(
                 self.cache_path,
-                keep_in_memory=vector_map_params.get("keep_in_memory", True),
+                keep_in_memory=self.vector_map_params.get("keep_in_memory", True),
             )
 
         self.cache_lane_graphs = cache_lane_graphs
