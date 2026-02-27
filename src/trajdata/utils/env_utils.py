@@ -67,6 +67,11 @@ def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDa
 
         return MADSDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
+    if "usdz" in dataset_name:
+        from trajdata.dataset_specific.usdz import UsdzDataset
+
+        return UsdzDataset(dataset_name, data_dir, parallelizable=True, has_maps=True, **dataset_kwargs)
+
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 
