@@ -365,8 +365,6 @@ class MADSDataset(RawDataset):
             slerp = Slerp(group_df["rel_time_seconds"], r)
             interp_r = slerp(target_times)
             headings = interp_r.as_euler("zyx", degrees=False)[:, 0]
-            # Scalar-last
-            # interp_quats = interp_r.as_quat()
 
             df = pd.DataFrame(
                 {
