@@ -299,7 +299,6 @@ def populate_vector_map(vector_map: VectorMap, map_root) -> None:
         minimum_bound = np.fmin(minimum_bound, midlane_pts.min(axis=0))
 
         # Adding the element to the map.
-
         new_lane = RoadLane(
             id=lane_id,
             center=Polyline(midlane_pts).interpolate(max_dist=MAX_POLYLINE_POINT_DIST),
