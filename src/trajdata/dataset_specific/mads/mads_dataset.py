@@ -67,8 +67,8 @@ class MADSDataset(RawDataset):
 
             # Sometimes the folder structure is .../clipgt_id/clipgt_id/files
             clip_file = glob.glob(
-                os.path.join(expanded_data_dir, subdir) + "/**/clip.parquet", 
-                recursive=True
+                os.path.join(expanded_data_dir, subdir) + "/**/clip.parquet",
+                recursive=True,
             )
 
             if len(clip_file) == 0:
@@ -87,7 +87,7 @@ class MADSDataset(RawDataset):
         # Match scene with corresponding map. Each scene has a matching map.
 
         clip_items = list(clip_dir.items())
-        random.shuffle(clip_items)
+        random.Random(42).shuffle(clip_items)
         self.clip_dir = dict(clip_items)
         clip_ids = list(clip_dir.keys())
 
@@ -133,8 +133,7 @@ class MADSDataset(RawDataset):
         for idx, (clip_id, dir) in enumerate(self.clip_dir.items()):
             scene_location = "clipGT"
             if clip_id not in self.metadata.scene_split_map:
-                print("Alert!!!!! scene {} not in scene_split_map".format(clip_id))
-                continue
+                raise ValueError(f"Scene {clip_id} not in scene_split_map")
 
             scene_split: str = self.metadata.scene_split_map[clip_id]
             scene_length: int = int(self.clip_duration[clip_id] / MADS_DT)
@@ -209,13 +208,13 @@ class MADSDataset(RawDataset):
         )
 
     def _get_df_from_path(self, scene_path, scene_name):
-
         dynamic_df = pd.read_parquet(os.path.join(scene_path, "obstacle.parquet"))
         dynamic_df = mads_utils.df_expand_json(dynamic_df)
-        
-        assert (
-            len(dynamic_df["key.clip_id"].unique()) == 1
-        ), f"Expected only one clip_id, but got {dynamic_df['key.clip_id'].unique()=}"
+
+        if len(dynamic_df["key.clip_id"].unique()) != 1:
+            raise ValueError(
+                f"Expected only one clip_id, but got {dynamic_df['key.clip_id'].unique()}"
+            )
 
         # Filter for clip_id
         dynamic_df = dynamic_df[(dynamic_df["key.clip_id"] == scene_name)]
@@ -303,9 +302,8 @@ class MADSDataset(RawDataset):
         t0 = ego_df["key.timestamp_micros"].iat[0]
         tf = ego_df["key.timestamp_micros"].iat[-1]
 
-        assert (
-            dynamic_df["key.timestamp_micros"] < tf
-        ).all(), "Some dynamic data is after the last ego data."
+        if not (dynamic_df["key.timestamp_micros"] < tf).all():
+            raise ValueError("Some dynamic data is after the last ego data.")
 
         dynamic_df = pd.concat([ego_df, dynamic_df])
 
@@ -318,7 +316,6 @@ class MADSDataset(RawDataset):
         for group_name, group_df in dynamic_df.groupby(
             ["key.clip_id", "key.label_class_id", "agent_id"]
         ):
-
             group_df = group_df.sort_values(by=["rel_time_seconds"])
 
             duplicated = group_df.duplicated(subset=["rel_time_seconds"])
