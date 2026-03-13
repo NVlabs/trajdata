@@ -442,7 +442,7 @@ class MADSDataset(RawDataset):
 
         # Filter out agents that are too close to each other
         # Strategy: For simplicity and speed we only compare the xy locations of agents
-        # when they are first seen. This might ofc missing cases when the agent moves
+        # when they are first seen. This might miss cases when the agent moves
         # and the 'ghost' object appears later.
         # We start by adding all agents with gt labels. Then, we iterate over the rest
         # of the agents and either:
