@@ -45,6 +45,11 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
             dataset_name, data_dir, parallelizable=True, has_maps=True
         )
 
+    if "mads" in dataset_name.lower():
+        from trajdata.dataset_specific.mads import MADSDataset
+
+        return MADSDataset(dataset_name, data_dir, parallelizable=True, has_maps=False)
+
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 
