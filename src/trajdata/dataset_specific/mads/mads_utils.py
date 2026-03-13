@@ -87,10 +87,6 @@ def find_lane_polylines_parquet(
             if wait_line_df.shape[0] > 0
             else {}
         )
-            
-
-        # label_data = data_item.get('labelFamily')
-        # print(label_data)
 
         if lane_id not in lanes_dict:
             lanes_dict[lane_id] = {}
