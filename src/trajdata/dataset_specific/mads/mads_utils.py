@@ -39,7 +39,7 @@ def df_expand_json(df: pd.DataFrame) -> pd.DataFrame:
 def find_lane_polylines_parquet(
     df_lane: pd.DataFrame,
     df_lane_relation: pd.DataFrame,
-    clip_id,
+    clip_id: str,
     df_wait_line: pd.DataFrame,
 ) -> Dict[str, Dict[str, Any]]:
     lanes_dict = {}
