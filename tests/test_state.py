@@ -1,3 +1,5 @@
+import importlib
+import importlib.util
 import unittest
 
 import numpy as np
@@ -8,6 +10,8 @@ from trajdata import UnifiedDataset, AgentBatch, AgentType
 from trajdata.data_structures import AgentBatchElement, SceneBatchElement
 from collections import defaultdict
 from torch.utils.data import DataLoader
+
+_has_nuscenes = importlib.util.find_spec("nuscenes") is not None
 
 AgentStateArray = NP_STATE_TYPES["x,y,z,xd,yd,xdd,ydd,h"]
 AgentObsArray = NP_STATE_TYPES["x,y,z,xd,yd,xdd,ydd,s,c"]
@@ -190,6 +194,7 @@ class TestStateArray(unittest.TestCase):
         self.assertTrue(isinstance(c, float))
 
 
+@unittest.skipUnless(_has_nuscenes, "nuscenes package not installed")
 class TestDataset(unittest.TestCase):
     def test_dataloading(self):
         dataset = UnifiedDataset(
