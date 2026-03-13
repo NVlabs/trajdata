@@ -282,10 +282,6 @@ def populate_vector_map(vector_map: VectorMap, map_root) -> None:
         left_polyline = np.array(lane_info_dict["left_rail"])
         right_polyline = np.array(lane_info_dict["right_rail"])
 
-        # Ensuring the left and right bounds have the same numbers of points.
-        # if len(left_pts) != len(right_pts):
-        #     interpolate_points(left_pts, right_pts)
-
         midlane_pts: np.ndarray = (left_polyline + right_polyline) / 2
 
         # Computing the maximum and minimum map coordinates.
