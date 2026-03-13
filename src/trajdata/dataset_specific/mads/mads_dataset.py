@@ -376,10 +376,6 @@ class MADSDataset(RawDataset):
                     "x": _interp("x"),
                     "y": _interp("y"),
                     "z": _interp("z"),
-                    # "qx": interp_quats[:, 0],
-                    # "qy": interp_quats[:, 1],
-                    # "qz": interp_quats[:, 2],
-                    # "qw": interp_quats[:, 3],
                     "heading": headings,
                     # We interpolate this as this might change!
                     # In particular, I found this to change for manual labels.
