@@ -344,11 +344,6 @@ class MADSDataset(RawDataset):
                     return CubicSpline(x, y)(target_times)
                 return np.interp(target_times, x, y)
 
-            # assert (
-            #     group_df["length"].unique().size == 1
-            # ), f'{group_df["length"].unique()}, {group_df}'
-            # assert group_df["width"].unique().size == 1, group_df
-            # assert group_df["height"].unique().size == 1, group_df
             if not group_df["type"].unique().size == 1:
                 print(
                     "Multiple types encountered for agent: "
