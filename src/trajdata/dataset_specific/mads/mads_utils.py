@@ -220,7 +220,7 @@ def find_wait_lines_parquet(df_wait_line: pd.DataFrame, clip_id: str) -> Dict[st
                 axis=1,
             )
         wait_lines_dict[wait_line_id]['category'] = df_wait_line['WaitLine.category'][i] # Yield/Stop
-        wait_lines_dict[wait_line_id]['implicit'] = df_wait_line['WaitLine.is_implicit'][i] # TODO: unclear what this means, need to check with clipgt team
+        wait_lines_dict[wait_line_id]['implicit'] = df_wait_line['WaitLine.is_implicit'][i] # TODO: need to clarify what this specifically refers to
     return wait_lines_dict
 
 def interpolate_points(list1, list2):
