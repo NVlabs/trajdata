@@ -382,9 +382,6 @@ class MADSDataset(RawDataset):
                     "length": _interp("length"),
                     "width": _interp("width"),
                     "height": _interp("height"),
-                    # "length": group_df["length"].iat[0],
-                    # "width": group_df["width"].iat[0],
-                    # "height": group_df["height"].iat[0],
                     "type": group_df["type"].iat[0],
                     "source": group_df["source"].iat[0],
                 }
