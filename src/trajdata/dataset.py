@@ -261,6 +261,7 @@ class UnifiedDataset(Dataset):
 
         # Pass dataset-specific kwargs to raw datasets
         dataset_kwargs = dataset_kwargs or {}
+        self.dataset_kwargs = dataset_kwargs  # Save for later use in parallel preprocessing
         self.envs: List[RawDataset] = env_utils.get_raw_datasets(
             data_dirs, **dataset_kwargs
         )
@@ -979,6 +980,7 @@ class UnifiedDataset(Dataset):
                 self.desired_dt,
                 self.cache_class,
                 self.rebuild_cache,
+                self.dataset_kwargs,
             )
 
             # Done with this list. Cutting memory usage because
