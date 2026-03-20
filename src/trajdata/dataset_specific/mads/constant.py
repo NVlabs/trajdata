@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 
 """Constants and enums for the MADS dataset loader."""
 
@@ -25,7 +26,7 @@ EGO_LENGTH: Final[float] = 5.2993629
 EGO_WIDTH: Final[float] = 2.11311007
 EGO_HEIGHT: Final[float] = 1.34435794
 
-# by default, we support internal production v2 dataset, with clipgt-2.0.0 and above.
+# by default, we support v2 data, version clipgt-2.0.0, clipgt-2.3.0 and above.
 DATA_SRC: Final[str] = "v2"
 
 # Allowed MADS data source tags.
@@ -53,7 +54,7 @@ USE_CUBIC_INTERPOLATION: Final[bool] = False
 
 
 class ObstacleClassV1(Enum):
-    """Obstacle classes for MADS based on NDAS `obstacle_types.proto`."""
+    """Obstacle classes for MADS."""
 
     # buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
     OBSTACLE_CLASS_INVALID = 0

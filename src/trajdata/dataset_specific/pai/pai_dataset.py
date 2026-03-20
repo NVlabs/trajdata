@@ -51,7 +51,7 @@ class PAIDataset(RawDataset):
         egomotion_dir = Path(self.data_dir) / "labels" / "egomotion"
         if not egomotion_dir.exists():
             raise FileNotFoundError(
-                f"Expected PAI egomotion directory at {egomotion_dir}."
+                f"Expected PhysicalAI-AV egomotion directory at {egomotion_dir}."
             )
 
         clip_dir: Dict[str, str] = {}
@@ -85,7 +85,7 @@ class PAIDataset(RawDataset):
         self.clip_duration = clip_duration
 
         clip_items = list(clip_dir.items())
-        random.shuffle(clip_items)
+        random.Random(42).shuffle(clip_items)
         self.clip_dir = dict(clip_items)
 
         all_clips = [clip_id for clip_id, _ in clip_items]
@@ -199,7 +199,7 @@ class PAIDataset(RawDataset):
         return pd.read_parquet(scene_path)
 
     @staticmethod
-    def get_df_from_path(
+    def get_ego_df_from_path(
         scene_path: str,
         scene_name: str,
         verbose: bool = False,
@@ -243,24 +243,10 @@ class PAIDataset(RawDataset):
         elif all(key in ego_df.columns for key in prefixed_map.keys()):
             normalized = ego_df.rename(columns=prefixed_map).copy()
         else:
+            expected_cols = [*col_map.keys(), *prefixed_map.keys()]
             missing = [
                 key
-                for key in [
-                    "x",
-                    "y",
-                    "z",
-                    "qx",
-                    "qy",
-                    "qz",
-                    "qw",
-                    "EgomotionEstimate.location.x",
-                    "EgomotionEstimate.location.y",
-                    "EgomotionEstimate.location.z",
-                    "EgomotionEstimate.orientation.x",
-                    "EgomotionEstimate.orientation.y",
-                    "EgomotionEstimate.orientation.z",
-                    "EgomotionEstimate.orientation.w",
-                ]
+                for key in expected_cols
                 if key not in ego_df.columns
             ]
             raise KeyError(
@@ -359,7 +345,7 @@ class PAIDataset(RawDataset):
     def get_agent_info(
         self, scene: Scene, cache_path: Path, cache_class: Type[SceneCache]
     ) -> Tuple[List[AgentMetadata], List[List[AgentMetadata]]]:
-        ego_df = self.get_df_from_path(self.clip_dir[scene.name], scene.name)
+        ego_df = self.get_ego_df_from_path(self.clip_dir[scene.name], scene.name)
         ego_df.set_index(["agent_id", "scene_ts"], inplace=True)
 
         ego_metadata = AgentMetadata(

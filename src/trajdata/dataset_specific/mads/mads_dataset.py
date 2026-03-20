@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 
 import argparse
 import glob
@@ -124,7 +125,7 @@ class MADSDataset(RawDataset):
         # get all clip ids
         self.clip_duration = clip_duration
         clip_items = list(clip_dir.items())
-        random.shuffle(clip_items)
+        random.Random(42).shuffle(clip_items)
         self.clip_dir = dict(clip_items)
         clip_ids = list(clip_dir.keys())
         all_clips = [clip_id for clip_id, _ in clip_items[:]]
@@ -278,7 +279,7 @@ class MADSDataset(RawDataset):
         )
 
     @staticmethod
-    def get_df_from_path(
+    def get_ego_df_from_path(
         scene_path: str,
         scene_name: str,
         verbose: bool = False,
@@ -598,7 +599,7 @@ class MADSDataset(RawDataset):
     def get_agent_info(
         self, scene: Scene, cache_path: Path, cache_class: Type[SceneCache]
     ) -> Tuple[List[AgentMetadata], List[List[AgentMetadata]]]:
-        sorted_df = self.get_df_from_path(self.clip_dir[scene.name], scene.name)
+        sorted_df = self.get_ego_df_from_path(self.clip_dir[scene.name], scene.name)
 
         contain_obstacles: bool = False
         agent_list: List[AgentMetadata] = []
@@ -761,12 +762,10 @@ class MADSDataset(RawDataset):
 
 def _debug_dump_scene_df(data_src: Optional[str] = None) -> None:
     """Debug helper to inspect one scene dataframe when run as a script."""
-    scene_path = (
-        "/lustre/fsw/portfolios/nvr/users/xweng/agentdriver_alpamayo/data/new_data"
-    )
+    scene_path = 'path/to/source/data'
     scene_name = "762e063d-6eb9-43ae-959c-e53af10b53f9"
     scene_path = os.path.join(scene_path, scene_name)
-    ego_df: pd.DataFrame = MADSDataset.get_df_from_path(
+    ego_df: pd.DataFrame = MADSDataset.get_ego_df_from_path(
         scene_path, scene_name, verbose=True, data_src=data_src
     )
 
