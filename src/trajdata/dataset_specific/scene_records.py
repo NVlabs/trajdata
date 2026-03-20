@@ -62,3 +62,18 @@ class NuPlanSceneRecord(NamedTuple):
     split: str
     # desc: str
     data_idx: int
+
+class MadsSceneRecord(NamedTuple):
+    name: str
+    location: str
+    length: str
+    split: str
+    data_idx: int
+
+
+class PAISceneRecord(NamedTuple):
+    name: str
+    location: str
+    length: str
+    split: str
+    data_idx: int
