@@ -62,9 +62,14 @@ class ParallelDatasetPreprocessor(Dataset):
         scene_idx: int = self.scene_name_idxs[idx]
 
         env_name: str = str(self.env_names_arr[env_idx], encoding="utf-8")
-        # Pass dataset_kwargs to get_raw_dataset so child processes get the same config
+
+        # Extract dataset-specific kwargs (empty dict if not specified)
+        # Note: For nuplan datasets, config_dir has been converted to central_tokens_config
+        # in the main process to avoid repeatedly loading YAML files in each worker
+        specific_kwargs = self.dataset_kwargs.get(env_name, {})
+
         raw_dataset = env_utils.get_raw_dataset(
-            env_name, str(self.data_dir_arr[env_idx], encoding="utf-8"), **self.dataset_kwargs
+            env_name, str(self.data_dir_arr[env_idx], encoding="utf-8"), **specific_kwargs
         )
 
         scene_name: str = str(self.scene_names_arr[scene_idx], encoding="utf-8")

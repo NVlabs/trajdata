@@ -32,9 +32,8 @@ class NuplanDataset(RawDataset):
         data_dir: str,
         parallelizable: bool = True,
         has_maps: bool = True,
-        yaml_config_path: Optional[Path] = None,
         central_tokens_config: Optional[List[Dict[str, Any]]] = None,
-        num_timesteps_before: Optional[int] = None,                                                                                                                                           
+        num_timesteps_before: Optional[int] = None,
         num_timesteps_after: Optional[int] = None,
         use_central_tokens: bool = False,
     ) -> None:
@@ -44,23 +43,22 @@ class NuplanDataset(RawDataset):
             data_dir: Data directory path
             parallelizable: Whether dataset is parallelizable
             has_maps: Whether dataset has maps
-            yaml_config_path: Optional path to yaml config file
             central_tokens_config: Optional central tokens configuration
             num_timesteps_before: Number of timesteps before central token
             num_timesteps_after: Number of timesteps after central token
             use_central_tokens: Whether to use central token mode (default: False for backward compatibility)
-                               If yaml_config_path or central_tokens_config is provided, this will be set to True automatically
+                               If central_tokens_config is provided, this will be set to True automatically
         """
         super().__init__(name, data_dir, parallelizable, has_maps)
-        self._yaml_config_path = yaml_config_path
         self._central_tokens_config = central_tokens_config
         self._num_timesteps_before = num_timesteps_before if num_timesteps_before is not None else 30
         self._num_timesteps_after = num_timesteps_after if num_timesteps_after is not None else 80
 
         # Auto-enable central token mode if config is provided
-        if yaml_config_path is not None or central_tokens_config is not None:
+        if central_tokens_config is not None:
             use_central_tokens = True
         self._use_central_tokens = use_central_tokens
+
     
     def compute_metadata(self, env_name: str, data_dir: str) -> EnvMetadata:
         all_log_splits: Dict[str, List[str]] = nuplan_utils.create_splits_logs()
@@ -121,7 +119,6 @@ class NuplanDataset(RawDataset):
             self.metadata.data_dir,
             subfolder,
             central_tokens_config=self._central_tokens_config,
-            yaml_config_path=self._yaml_config_path,
             num_timesteps_before=self._num_timesteps_before,
             num_timesteps_after=self._num_timesteps_after,
             use_central_tokens=self._use_central_tokens,

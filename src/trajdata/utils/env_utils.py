@@ -11,8 +11,9 @@ def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDa
         dataset_name: Name of the dataset (e.g., "nuplan_mini", "usdz")
         data_dir: Path to the dataset directory
         **dataset_kwargs: Dataset-specific keyword arguments.
-                         For example, Nuplan accepts: central_tokens_config, yaml_config_path,
-                         num_timesteps_before, num_timesteps_after, use_central_tokens
+                         For Nuplan: config_dir (Path to directory containing YAML configs),
+                                    num_timesteps_before, num_timesteps_after
+                         For USDZ: smooth_trajectories, etc.
 
     Returns:
         RawDataset instance for the specified dataset
@@ -83,7 +84,9 @@ def get_raw_datasets(
 
     Args:
         data_dirs: Dictionary mapping dataset names to their data directories
-        **dataset_kwargs: Dataset-specific keyword arguments passed to each dataset
+        **dataset_kwargs: Dataset-specific keyword arguments in nested dict format:
+                         {'nuplan_mini': {...}, 'usdz': {...}}
+                         Each dataset gets its own specific parameters.
 
     Returns:
         List of RawDataset instances
@@ -91,6 +94,8 @@ def get_raw_datasets(
     raw_datasets: List[RawDataset] = list()
 
     for dataset_name, data_dir in data_dirs.items():
-        raw_datasets.append(get_raw_dataset(dataset_name, data_dir, **dataset_kwargs))
+        # Extract dataset-specific kwargs (empty dict if not specified)
+        specific_kwargs = dataset_kwargs.get(dataset_name, {})
+        raw_datasets.append(get_raw_dataset(dataset_name, data_dir, **specific_kwargs))
 
     return raw_datasets

@@ -59,7 +59,6 @@ class NuPlanObject:
         dataset_path: Path,
         subfolder: str,
         central_tokens_config: Optional[List[Dict[str, Any]]] = None,
-        yaml_config_path: Optional[Path] = None,
         num_timesteps_before: int = 30,
         num_timesteps_after: int = 80,
         use_central_tokens: bool = False,
@@ -69,7 +68,6 @@ class NuPlanObject:
             dataset_path: Root path of the NuPlan dataset.
             subfolder: Subfolder name (e.g. "test", "train").
             central_tokens_config: Optional list of central tokens configurations.
-            yaml_config_path: Optional path to yaml configuration file.
             num_timesteps_before: Default number of timesteps before the central token.
             num_timesteps_after: Default number of timesteps after the central token.
             use_central_tokens: Whether to use central token mode (default: False for backward compatibility).
@@ -84,26 +82,12 @@ class NuPlanObject:
         self.use_central_tokens = use_central_tokens
 
         # Auto-enable central token mode if config is provided
-        if yaml_config_path is not None or central_tokens_config is not None:
+        if central_tokens_config is not None:
             self.use_central_tokens = True
 
         # Prepare central tokens config if in central token mode
-        if self.use_central_tokens:
-            # Prefer yaml_config_path, then central_tokens_config
-            if yaml_config_path is not None and yaml_config_path.exists():
-                self.central_tokens_config = self._load_config_from_yaml(yaml_config_path)
-            elif central_tokens_config is not None:
-                self.central_tokens_config = central_tokens_config
-            else:
-                # Default configuration (for backward compatibility with the new mode)
-                self.central_tokens_config = [
-                    {
-                        "central_token": "1aa44d46e4ab5bc7",
-                        "logfile": "2021.05.12.19.36.12_veh-35_00005_00204",
-                        "num_timesteps_before": num_timesteps_before,
-                        "num_timesteps_after": num_timesteps_after,
-                    }
-                ]
+        if self.use_central_tokens and central_tokens_config is not None:
+            self.central_tokens_config = central_tokens_config
         else:
             self.central_tokens_config = []
 
@@ -112,41 +96,6 @@ class NuPlanObject:
             self.scenes: List[Dict[str, str]] = self._load_scenes_from_central_tokens()
         else:
             self.scenes: List[Dict[str, str]] = self._load_scenes()
-    
-    def _load_config_from_yaml(self, yaml_path: Path) -> List[Dict[str, Any]]:
-        """
-        Load configuration from a yaml file.
-        
-        Args:
-            yaml_path: Path to yaml configuration file.
-            
-        Returns:
-            List of central_tokens_config dictionaries.
-        """
-        import yaml as yaml_loader
-        
-        with open(yaml_path, 'r') as f:
-            config = yaml_loader.safe_load(f)
-        
-        # Extract central_log and central_tokens.
-        central_log = config.get('central_log', '')
-        central_tokens = config.get('central_tokens', [])
-        
-        if not central_log or not central_tokens:
-            print(f"Warning: yaml file {yaml_path} missing central_log or central_tokens, skipping...")
-            return []
-        
-        # Build configuration list.
-        config_list = []
-        for token in central_tokens:
-            config_list.append({
-                "central_token": token,
-                "logfile": central_log,
-                "num_timesteps_before": self.num_timesteps_before,
-                "num_timesteps_after": self.num_timesteps_after,
-            })
-        
-        return config_list
 
     def open_db(self, db_filename: str) -> None:
         self.connection = sqlite3.connect(str(self.base_path / db_filename))
@@ -186,8 +135,6 @@ class NuPlanObject:
             {
                 "central_token": "hex_string",  # central token as hex string
                 "logfile": "log_filename",      # corresponding log file name (without .db extension)
-                "num_timesteps_before": 50,     # number of timesteps before the central point
-                "num_timesteps_after": 50,      # number of timesteps after the central point
             },
             ...
         ]
@@ -197,8 +144,6 @@ class NuPlanObject:
         for config in self.central_tokens_config:
             central_token_hex = config["central_token"]
             logfile = config["logfile"]
-            num_timesteps_before = config.get("num_timesteps_before", 50)
-            num_timesteps_after = config.get("num_timesteps_after", 50)
             
             # Convert hex string to bytearray.
             central_token = bytearray.fromhex(central_token_hex)
@@ -258,8 +203,8 @@ class NuPlanObject:
                 continue
             
             # Compute the range and store it in the config.
-            start_idx = max(0, central_idx - num_timesteps_before)
-            end_idx = min(len(all_frames), central_idx + num_timesteps_after + 1)
+            start_idx = max(0, central_idx - self.num_timesteps_before)
+            end_idx = min(len(all_frames), central_idx + self.num_timesteps_after + 1)
             
             # Store start_idx and end_idx in the config.
             config["start_idx"] = start_idx
