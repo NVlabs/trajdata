@@ -50,7 +50,6 @@ def resolve_data_src(cli_override: Optional[str] = None) -> str:
 # Minimum frames for an agent to be considered.
 MIN_FRAMES: Final[int] = 10
 
-USE_CUBIC_INTERPOLATION: Final[bool] = False
 
 
 class ObstacleClassV1(Enum):

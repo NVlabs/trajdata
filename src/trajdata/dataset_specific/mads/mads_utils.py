@@ -15,10 +15,12 @@
 #
 
 import multiprocessing
+import json
 import os
+import warnings
 from concurrent import futures
 from functools import partial
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -384,6 +386,203 @@ def _process_lanes_parallel(
     return sorted_results
 
 
+def _validate_map_timestamp_sampling(ts_list: np.ndarray, map_root: str) -> None:
+    """Validate timestamp cadence and optionally emit rich debug artifacts."""
+    expected_raw_delta_micros = 100_000
+    sample_rate = 20
+    expected_sampled_delta_micros = expected_raw_delta_micros * sample_rate
+
+    raw_tolerance_micros = 500
+    sampled_tolerance_micros = 10_000
+    hard_gap_factor = 1.5
+
+    raw_deltas = np.diff(ts_list)
+    sampled_ts = ts_list[::sample_rate]
+    sampled_deltas = np.diff(sampled_ts)
+
+    raw_abs_err = np.abs(raw_deltas - expected_raw_delta_micros)
+    sampled_abs_err = np.abs(sampled_deltas - expected_sampled_delta_micros)
+
+    raw_within_tolerance = bool(np.all(raw_abs_err <= raw_tolerance_micros))
+    sampled_within_tolerance = bool(
+        np.all(sampled_abs_err <= sampled_tolerance_micros)
+    )
+
+    raw_hard_gap_threshold = int(expected_raw_delta_micros * hard_gap_factor)
+    sampled_hard_gap_threshold = int(expected_sampled_delta_micros * hard_gap_factor)
+    raw_hard_gap_mask = raw_deltas > raw_hard_gap_threshold
+    sampled_hard_gap_mask = sampled_deltas > sampled_hard_gap_threshold
+    has_meaningful_gaps = bool(np.any(raw_hard_gap_mask) or np.any(sampled_hard_gap_mask))
+
+    debug_dir_override = os.getenv("MADS_TS_DEBUG_DIR")
+    debug_dir_override_str = debug_dir_override.strip() if debug_dir_override else ""
+
+    # Silent by default: only emit timestamp-gap warnings/debug artifacts when
+    # explicit debug mode is enabled by providing MADS_TS_DEBUG_DIR.
+    if not debug_dir_override_str:
+        return
+
+    force_debug = True
+    base_debug_dir = debug_dir_override_str
+    clip_tag = os.path.basename(os.path.normpath(map_root)) or "unknown_clip"
+    clip_tag = clip_tag.replace(" ", "_")
+    debug_dir = os.path.join(base_debug_dir, clip_tag)
+
+    should_write_debug = has_meaningful_gaps
+    if not should_write_debug:
+        return
+
+    try:
+        os.makedirs(debug_dir, exist_ok=True)
+
+        debug_csv_path = os.path.join(debug_dir, "mads_ts_debug.csv")
+        summary_json_path = os.path.join(debug_dir, "mads_ts_debug_summary.json")
+
+        is_sampled = np.zeros(ts_list.size, dtype=bool)
+        is_sampled[::sample_rate] = True
+
+        delta_to_next: List[Optional[int]] = [int(delta) for delta in raw_deltas]
+        delta_to_next.append(None)
+
+        nominal_step_to_next: List[Optional[bool]] = [
+            bool(abs(int(delta) - expected_raw_delta_micros) <= raw_tolerance_micros)
+            for delta in raw_deltas
+        ]
+        nominal_step_to_next.append(None)
+
+        debug_df = pd.DataFrame(
+            {
+                "idx": np.arange(ts_list.size, dtype=np.int64),
+                "timestamp_micros": ts_list.astype(np.int64),
+                "delta_to_next_micros": delta_to_next,
+                "is_sampled": is_sampled,
+                "is_nominal_step_to_next": nominal_step_to_next,
+            }
+        )
+        debug_df.to_csv(debug_csv_path, index=False)
+
+        summary: Dict[str, Any] = {
+            "num_timestamps": int(ts_list.size),
+            "expected_raw_delta_micros": int(expected_raw_delta_micros),
+            "expected_sampled_delta_micros": int(expected_sampled_delta_micros),
+            "sample_rate_steps": int(sample_rate),
+            "raw_tolerance_micros": int(raw_tolerance_micros),
+            "sampled_tolerance_micros": int(sampled_tolerance_micros),
+            "raw_within_tolerance": raw_within_tolerance,
+            "sampled_within_tolerance": sampled_within_tolerance,
+            "force_debug": force_debug,
+            "num_raw_out_of_tolerance": int(np.sum(raw_abs_err > raw_tolerance_micros)),
+            "num_sampled_out_of_tolerance": int(
+                np.sum(sampled_abs_err > sampled_tolerance_micros)
+            ),
+            "raw_hard_gap_threshold_micros": int(raw_hard_gap_threshold),
+            "sampled_hard_gap_threshold_micros": int(sampled_hard_gap_threshold),
+            "num_raw_hard_gaps": int(np.sum(raw_hard_gap_mask)),
+            "num_sampled_hard_gaps": int(np.sum(sampled_hard_gap_mask)),
+            "has_meaningful_gaps": has_meaningful_gaps,
+            "raw_delta_min_micros": (
+                int(raw_deltas.min()) if raw_deltas.size > 0 else None
+            ),
+            "raw_delta_max_micros": (
+                int(raw_deltas.max()) if raw_deltas.size > 0 else None
+            ),
+            "sampled_delta_min_micros": (
+                int(sampled_deltas.min()) if sampled_deltas.size > 0 else None
+            ),
+            "sampled_delta_max_micros": (
+                int(sampled_deltas.max()) if sampled_deltas.size > 0 else None
+            ),
+        }
+
+        with open(summary_json_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, sort_keys=True)
+
+        if has_meaningful_gaps:
+            warnings.warn(
+                "Detected meaningful map timestamp gaps; sampling remains unchanged "
+                f"(every {sample_rate}th entry). Debug files saved under: "
+                f"{debug_dir}",
+                stacklevel=2,
+            )
+    except OSError as exc:
+        warnings.warn(
+            "Timestamp validation found issues, but failed to write debug files "
+            f"to {debug_dir}: {exc}",
+            stacklevel=2,
+        )
+
+def _select_strict_2s_timestamps(
+    ts_list: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Select timestamps on a strict 2s time grid with nearest-neighbor snapping."""
+    grid_step_micros = 2_000_000
+    base_dt_micros = 100_000
+    sample_rate = 20
+    max_snap_micros = int(os.getenv("MADS_MAP_STRICT_MAX_SNAP_US", "150000"))
+
+    # 1) Fast exit for empty clips.
+    if ts_list.size == 0:
+        empty = np.array([], dtype=np.int64)
+        stats: Dict[str, Any] = {
+            "grid_step_micros": grid_step_micros,
+            "max_snap_micros": max_snap_micros,
+            "target_count": 0,
+            "selected_count": 0,
+            "coverage": 0.0,
+            "max_abs_snap_error_micros": None,
+            "sample_rate_steps": sample_rate,
+        }
+        return empty, empty, stats
+
+    # 2) Build ideal 2s targets from the first to last timestamp.
+    start_ts = int(ts_list[0])
+    end_ts = int(ts_list[-1])
+    targets = np.arange(start_ts, end_ts + 1, grid_step_micros, dtype=np.int64)
+
+    right_idx = np.searchsorted(ts_list, targets, side="left")
+    # 3) For each target, get nearest left/right candidates in ts_list.
+    left_idx = np.clip(right_idx - 1, 0, ts_list.size - 1)
+    right_idx_clipped = np.clip(right_idx, 0, ts_list.size - 1)
+
+    left_ts = ts_list[left_idx]
+    right_ts = ts_list[right_idx_clipped]
+    # 4) Snap each target to whichever candidate is closer.
+    choose_right = (right_idx < ts_list.size) & (
+        np.abs(right_ts - targets) < np.abs(left_ts - targets)
+    )
+    chosen_idx = np.where(choose_right, right_idx_clipped, left_idx)
+
+    # 5) Keep only snapped timestamps within max_snap_micros tolerance.
+    chosen_ts = ts_list[chosen_idx]
+    abs_snap_err = np.abs(chosen_ts - targets)
+    keep_mask = abs_snap_err <= max_snap_micros
+
+    kept_targets = targets[keep_mask]
+    kept_ts = chosen_ts[keep_mask]
+
+    # 6) Deduplicate in case nearby targets snap to the same source timestamp.
+    if kept_ts.size > 0:
+        unique_mask = np.concatenate(([True], kept_ts[1:] != kept_ts[:-1]))
+        kept_targets = kept_targets[unique_mask]
+        kept_ts = kept_ts[unique_mask]
+
+    # 7) Convert kept 2s targets into trajdata frame units (0.1s per frame).
+    #    Also compute summary stats for monitoring coverage/snap error.
+    selected_frame_idx = ((kept_targets - start_ts) // base_dt_micros).astype(np.int64)
+    max_abs_err = int(abs_snap_err[keep_mask].max()) if np.any(keep_mask) else None
+    coverage = float(np.sum(keep_mask) / targets.size) if targets.size > 0 else 0.0
+
+    stats = {
+        "grid_step_micros": grid_step_micros,
+        "max_snap_micros": max_snap_micros,
+        "target_count": int(targets.size),
+        "selected_count": int(kept_ts.size),
+        "coverage": coverage,
+        "max_abs_snap_error_micros": max_abs_err,
+        "sample_rate_steps": sample_rate,
+    }
+    return kept_ts.astype(np.int64), selected_frame_idx, stats
+
 def populate_vector_map(vector_map: VectorMap, map_root: str) -> None:
     """Populate `vector_map` from MADS lane parquet files.
 
@@ -431,10 +630,27 @@ def populate_vector_map(vector_map: VectorMap, map_root: str) -> None:
     if "key.timestamp_micros" not in df_lane_chunk:
         df_lane_chunk = df_expand_json(df_lane_chunk)
 
-    sample_rate = 20  # 20 * 0.1s = 2s
+    _validate_map_timestamp_sampling(ts_list=ts_list, map_root=map_root)
+
+    selected_ts, selected_frame_idx, strict_stats = _select_strict_2s_timestamps(
+        ts_list=ts_list
+    )
+    if strict_stats["target_count"] > 0 and strict_stats["selected_count"] == 0:
+        raise ValueError(
+            "Strict 2s timestamp sampling found no valid timestamps. "
+            f"map_root={map_root}, stats={strict_stats}"
+        )
+
+    if strict_stats["target_count"] > 0 and strict_stats["coverage"] < 0.9:
+        warnings.warn(
+            "Low strict 2s timestamp coverage; map output may be sparse. "
+            f"map_root={map_root}, stats={strict_stats}",
+            stacklevel=2,
+        )
+
     live_path_map_lanes: List[Tuple[int, List[Any]]] = []
 
-    for idx, ts in enumerate(ts_list[::sample_rate]):
+    for frame_idx, ts in zip(selected_frame_idx, selected_ts):
         dw_mask = df_dw_lane["key.timestamp_micros"] == ts
         chunk_mask = df_lane_chunk["key.timestamp_micros"] == ts
         df_dw_lane_ts: pd.DataFrame = df_dw_lane.loc[dw_mask]
@@ -442,7 +658,7 @@ def populate_vector_map(vector_map: VectorMap, map_root: str) -> None:
 
         live_path_map_lanes.append(
             (
-                idx * sample_rate,
+                int(frame_idx),
                 _process_lanes_parallel(
                     lane_table=df_dw_lane_ts,
                     lane_patch_table=df_lane_chunk_ts,

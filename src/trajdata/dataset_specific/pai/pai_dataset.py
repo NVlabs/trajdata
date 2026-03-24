@@ -97,11 +97,11 @@ class PAIDataset(RawDataset):
             dt=MADS_DT,
             parts=cast(List[Tuple[str]], dataset_parts),
             scene_split_map=scene_split_map,
-            map_locations=tuple(all_clips),
+            map_locations=cast(Tuple[str], tuple(all_clips)),
         )
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
-        pass
+        self.dataset_obj = True
 
     def _get_matching_scenes_from_obj(
         self,
@@ -250,7 +250,7 @@ class PAIDataset(RawDataset):
                 if key not in ego_df.columns
             ]
             raise KeyError(
-                f"Could not find expected ego pose columns for scene {scene_name}. Missing: {missing[:6]}"
+                f"Could not find expected ego pose columns for scene {scene_name}. Missing: {missing}"
             )
 
         normalized = normalized.sort_values(by=[timestamp_col]).drop_duplicates(

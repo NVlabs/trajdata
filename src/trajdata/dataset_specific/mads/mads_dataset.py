@@ -43,7 +43,6 @@ from trajdata.dataset_specific.mads.constant import (
     MADS_DT,
     MIN_FRAMES,
     SUPPORTED_DATA_SRCS,
-    USE_CUBIC_INTERPOLATION,
     ObstacleClassV1,
     resolve_data_src,
 )
@@ -259,7 +258,6 @@ class MADSDataset(RawDataset):
 
     def get_scene(self, scene_info: SceneMetadata) -> Scene:
         """Create a trajdata `Scene` from metadata."""
-        # Type hinting for scene_info is not working properly in python 3.10
 
         scene_name = scene_info.name
         data_idx = scene_info.raw_data_idx
@@ -279,11 +277,12 @@ class MADSDataset(RawDataset):
         )
 
     @staticmethod
-    def get_ego_df_from_path(
+    def get_ego_agent_df_from_path(
         scene_path: str,
         scene_name: str,
         verbose: bool = False,
         data_src: Optional[str] = None,
+        use_cubic_interpolation: bool = False,
     ) -> pd.DataFrame:
         """Load and normalize ego/dynamic data into a time-aligned dataframe.
 
@@ -292,6 +291,7 @@ class MADSDataset(RawDataset):
             scene_name: Clip ID.
             verbose: Whether to print debug information.
             data_src: Optional dataset source override (e.g., v2 or pai).
+            use_cubic_interpolation: Whether to use cubic spline for xyz/size interpolation.
 
         Returns:
             Normalized dataframe with one row per `(agent_id, scene_ts)`.
@@ -367,8 +367,6 @@ class MADSDataset(RawDataset):
             source="manual",
         )
         ego_df["key.label_class_id"] = ego_df[f"{egomotion_key}.name"].iat[0]
-
-        assert ego_df[f"{egomotion_key}.name"].unique().size == 1
         ego_df = ego_df.drop(columns=[f"{egomotion_key}.name"])
 
         # re-naming the fields
@@ -411,8 +409,6 @@ class MADSDataset(RawDataset):
         # timestamp
         t0 = ego_df["key.timestamp_micros"].iat[0]
         tf = ego_df["key.timestamp_micros"].iat[-1]
-        if verbose:
-            print("dynamic_df.empty", dynamic_df.empty)
 
         # Only select relevant dynamic data
         dynamic_df = pd.concat([ego_df, dynamic_df])
@@ -446,7 +442,7 @@ class MADSDataset(RawDataset):
             def _interp(col_name):
                 x = group_df["rel_time_seconds"]
                 y = group_df[col_name]
-                if USE_CUBIC_INTERPOLATION:
+                if use_cubic_interpolation:
                     return CubicSpline(x, y)(target_times)
                 return np.interp(target_times, x, y)
 
@@ -460,8 +456,6 @@ class MADSDataset(RawDataset):
             slerp = Slerp(group_df["rel_time_seconds"], r)
             interp_r = slerp(target_times)
             headings = interp_r.as_euler("zyx", degrees=False)[:, 0]
-            # Scalar-last
-            # interp_quats = interp_r.as_quat()
 
             df = pd.DataFrame(
                 {
@@ -473,19 +467,12 @@ class MADSDataset(RawDataset):
                     "x": _interp("x"),
                     "y": _interp("y"),
                     "z": _interp("z"),
-                    # "qx": interp_quats[:, 0],
-                    # "qy": interp_quats[:, 1],
-                    # "qz": interp_quats[:, 2],
-                    # "qw": interp_quats[:, 3],
                     "heading": headings,
                     # We interpolate this as this might change!
                     # In particular, I found this to change for manual labels.
                     "length": _interp("length"),
                     "width": _interp("width"),
                     "height": _interp("height"),
-                    # "length": group_df["length"].iat[0],
-                    # "width": group_df["width"].iat[0],
-                    # "height": group_df["height"].iat[0],
                     "type": group_df["type"].iat[0],
                     "source": group_df["source"].iat[0],
                 }
@@ -494,19 +481,18 @@ class MADSDataset(RawDataset):
             df["vx"] = df["x"].diff() / MADS_DT
             df["vy"] = df["y"].diff() / MADS_DT
 
+            # Clean velocity first, then derive acceleration from cleaned velocity
+            # to keep kinematic consistency (ax ~= dvx/dt, ay ~= dvy/dt).
+            df["vx"] = df["vx"].replace([np.inf, -np.inf], np.nan).bfill().ffill()
+            df["vy"] = df["vy"].replace([np.inf, -np.inf], np.nan).bfill().ffill()
+
             # Calculate ego accelerations 'ax' and 'ay'
             df["ax"] = df["vx"].diff() / MADS_DT
             df["ay"] = df["vy"].diff() / MADS_DT
 
-            # Replace infinity with nan for later nan handling
-            df["ax"] = df["ax"].replace([np.inf, -np.inf], np.nan)
-            df["ay"] = df["ay"].replace([np.inf, -np.inf], np.nan)
-
-            # The first row of ax and ay is NaN, fill in values where NaN exists
-            df["vx"] = df["vx"].bfill().ffill()
-            df["vy"] = df["vy"].bfill().ffill()
-            df["ax"] = df["ax"].bfill().ffill()
-            df["ay"] = df["ay"].bfill().ffill()
+            # Keep finite accelerations; boundary diff NaNs default to 0.
+            df["ax"] = df["ax"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            df["ay"] = df["ay"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
             interpolated_dfs.append(df)
         interpolated_df: pd.DataFrame = pd.concat(interpolated_dfs).reset_index(drop=True)
@@ -517,8 +503,7 @@ class MADSDataset(RawDataset):
         valid_scene_ts_mask: pd.Series = cast(
             pd.Series, (scene_ts_series >= 0) & (scene_ts_series <= T)
         )
-        valid_scene_ts_mask_np = np.asarray(valid_scene_ts_mask, dtype=bool)
-        interpolated_df = interpolated_df.loc[valid_scene_ts_mask_np]
+        interpolated_df = cast(pd.DataFrame, interpolated_df.loc[valid_scene_ts_mask])
 
         # Sort by distance to ego
         ego_start = interpolated_df.query("agent_id == 'ego' and scene_ts == 0")
@@ -552,7 +537,7 @@ class MADSDataset(RawDataset):
 
         # Filter out agents that are too close to each other
         # Strategy: For simplicity and speed we only compare the xy locations of agents
-        # when they are first seen. This might ofc missing cases when the agent moves
+        # when they are first seen. This might miss cases where the agent moves
         # and the 'ghost' object appears later.
         # We start by adding all agents with gt labels. Then, we iterate over the rest
         # of the agents and either:
@@ -599,7 +584,7 @@ class MADSDataset(RawDataset):
     def get_agent_info(
         self, scene: Scene, cache_path: Path, cache_class: Type[SceneCache]
     ) -> Tuple[List[AgentMetadata], List[List[AgentMetadata]]]:
-        sorted_df = self.get_ego_df_from_path(self.clip_dir[scene.name], scene.name)
+        sorted_df = self.get_ego_agent_df_from_path(self.clip_dir[scene.name], scene.name)
 
         contain_obstacles: bool = False
         agent_list: List[AgentMetadata] = []
@@ -679,8 +664,9 @@ class MADSDataset(RawDataset):
     ) -> None:
         """Cache one map into trajdata map cache if not already present."""
 
+        px_per_m: float = float(map_params.get("px_per_m", 4.0))
         save_file = os.path.join(
-            cache_path, self.metadata.name, "maps", f"{map_name}_4.00px_m.dill"
+            cache_path, self.metadata.name, "maps", f"{map_name}_{px_per_m:.2f}px_m.dill"
         )
         if os.path.exists(save_file):
             if verbose:
@@ -721,13 +707,15 @@ class MADSDataset(RawDataset):
         resume: bool = True,
     ) -> None:
         """Cache maps for all clips, optionally skipping already cached maps."""
+        px_per_m: float = float(map_params.get("px_per_m", 4.0))
+
 
         # select the ones that are not finished
         if resume:
             clip_dir_need_map = []
             for clip_id in self.clip_dir.keys():
                 map_file = os.path.join(
-                    cache_path, self.metadata.name, "maps", f"{clip_id}_4.00px_m.dill"
+                    cache_path, self.metadata.name, "maps", f"{clip_id}_{px_per_m:.2f}px_m.dill"
                 )
                 if not os.path.exists(map_file):
                     clip_dir_need_map.append(clip_id)
@@ -751,7 +739,7 @@ class MADSDataset(RawDataset):
         else:
             for map_name in tqdm(
                 clip_list,
-                desc=f"Caching {self.name} Maps at {map_params['px_per_m']:.2f} px/m",
+                desc=f"Caching {self.name} Maps at {px_per_m:.2f} px/m",
                 position=0,
             ):
                 self.cache_map(map_name, cache_path, map_cache_class, map_params)
@@ -765,27 +753,27 @@ def _debug_dump_scene_df(data_src: Optional[str] = None) -> None:
     scene_path = 'path/to/source/data'
     scene_name = "762e063d-6eb9-43ae-959c-e53af10b53f9"
     scene_path = os.path.join(scene_path, scene_name)
-    ego_df: pd.DataFrame = MADSDataset.get_ego_df_from_path(
+    ego_agent_df: pd.DataFrame = MADSDataset.get_ego_agent_df_from_path(
         scene_path, scene_name, verbose=True, data_src=data_src
     )
 
     # Display basic information
     print("\n--- DataFrame Shape (rows, columns) ---")
-    print(ego_df.shape)
+    print(ego_agent_df.shape)
 
     print("\n--- Column Names ---")
-    print(ego_df.columns.tolist())
+    print(ego_agent_df.columns.tolist())
 
     print("\n--- First 5 Rows ---")
-    print(ego_df.head())
+    print(ego_agent_df.head())
 
     print("\n--- DataFrame Info ---")
-    print(ego_df.info())
+    print(ego_agent_df.info())
 
     # Identify object columns
     include_dtypes = cast(Any, ["object", "int64", "float64"])
-    ego_df_any = cast(Any, ego_df)
-    selected_df: pd.DataFrame = cast(pd.DataFrame, ego_df_any.select_dtypes(include=include_dtypes))
+    ego_agent_df_any = cast(Any, ego_agent_df)
+    selected_df: pd.DataFrame = cast(pd.DataFrame, ego_agent_df_any.select_dtypes(include=include_dtypes))
     object_columns: List[str] = cast(List[str], [str(c) for c in list(selected_df.columns)])
     print("\nColumns with object dtype:", object_columns)
 
@@ -794,16 +782,16 @@ def _debug_dump_scene_df(data_src: Optional[str] = None) -> None:
         print(f"\nAnalyzing column: {col}")
 
         # Get unique types in the column
-        unique_types = ego_df[col].map(type).unique()
+        unique_types = ego_agent_df[col].map(type).unique()
         print("Unique data types:", unique_types)
 
         # Display a few sample values
-        sample_values = ego_df[col].dropna().sample(min(5, len(ego_df)), random_state=42)
+        sample_values = ego_agent_df[col].dropna().sample(min(5, len(ego_agent_df)), random_state=42)
         print("Sample values:", sample_values.tolist())
 
     # Show descriptive statistics
     print("\n--- Descriptive Statistics ---")
-    print(ego_df.describe(include="all"))
+    print(ego_agent_df.describe(include="all"))
 
 
 if __name__ == "__main__":  # pyright: ignore[reportUnreachableCode]
