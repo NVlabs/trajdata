@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from subprocess import check_call, check_output
@@ -13,6 +14,8 @@ from waymo_open_dataset.protos import scenario_pb2
 
 from trajdata.maps import TrafficLightStatus, VectorMap
 from trajdata.maps.vec_map_elements import PedCrosswalk, Polyline, RoadLane
+
+logger = logging.getLogger(__name__)
 
 WAYMO_DT: Final[float] = 0.1
 WAYMO_DATASET_NAMES = [
@@ -87,14 +90,20 @@ class WaymoScenarios:
 
     def download_dataset(self) -> None:
         # check_call("snap install google-cloud-sdk --classic".split())
-        gsutil = check_output(["which", "gsutil"])
-        download_cmd = (
-            str(gsutil.decode("utf-8"))
-            + "-m cp -r gs://waymo_open_dataset_motion_v_1_1_0/uncompressed/scenario/"
-            + str(self.name)
-            + " "
-            + str(self.source_dir)
-        ).split()
+        gsutil_path: str = check_output(["which", "gsutil"]).decode("utf-8").strip()
+        if not gsutil_path or not os.path.isfile(gsutil_path):
+            raise RuntimeError(
+                "gsutil not found. Install the Google Cloud SDK before downloading Waymo data. "
+                "See: https://cloud.google.com/sdk/docs/install"
+            )
+        download_cmd: List[str] = [
+            gsutil_path,
+            "-m",
+            "cp",
+            "-r",
+            f"gs://waymo_open_dataset_motion_v_1_1_0/uncompressed/scenario/{self.name}",
+            str(self.source_dir),
+        ]
         check_call(download_cmd)
 
     def split_scenarios(
@@ -103,13 +112,13 @@ class WaymoScenarios:
         source_it: Path = (self.source_dir / self.name).glob("*")
         file_names: List[str] = [str(file_name) for file_name in source_it]
         if verbose:
-            print("Loading tfrecord files...")
+            logger.info("Loading tfrecord files...")
         dataset = tf.data.TFRecordDataset(
             file_names, compression_type="", num_parallel_reads=num_parallel_reads
         )
 
         if verbose:
-            print("Splitting tfrecords...")
+            logger.info("Splitting tfrecords...")
 
         splitted_dir: Path = self.source_dir / f"{self.name}_splitted"
         if not splitted_dir.exists():
@@ -127,13 +136,11 @@ class WaymoScenarios:
 
         self.num_scenarios = scenario_num
         if verbose:
-            print(
-                str(self.num_scenarios)
-                + " scenarios from "
-                + str(len(file_names))
-                + " file(s) have been split into "
-                + str(self.num_scenarios)
-                + " files."
+            logger.info(
+                "%d scenarios from %d file(s) have been split into %d files.",
+                self.num_scenarios,
+                len(file_names),
+                self.num_scenarios,
             )
 
     def get_filename(self, data_idx):

@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from random import Random
 from typing import Any, Dict, Final, List, Optional, Tuple, Type
@@ -15,6 +16,8 @@ from trajdata.dataset_specific.scene_records import SDDPedsRecord
 from trajdata.utils import arr_utils
 
 from .estimated_homography import SDD_HOMOGRAPHY_SCALES
+
+logger = logging.getLogger(__name__)
 
 # SDD was captured at 30 frames per second.
 SDDPEDS_DT: Final[float] = 1.0 / 30.0
@@ -77,7 +80,7 @@ class SDDPedsDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         # Just storing the filepath and scene length (number of frames).
         # One could load the entire dataset here, but there's no need

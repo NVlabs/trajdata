@@ -1,3 +1,4 @@
+import logging
 import warnings
 from copy import deepcopy
 from pathlib import Path
@@ -24,6 +25,8 @@ from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.scene_records import VODSceneRecord
 from trajdata.dataset_specific.vod import vod_utils
 from trajdata.maps import VectorMap
+
+logger = logging.getLogger(__name__)
 
 
 class VODDataset(RawDataset):
@@ -86,7 +89,7 @@ class VODDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         if self.name == "vod_trainval":
             version_str = "v1.0-trainval"

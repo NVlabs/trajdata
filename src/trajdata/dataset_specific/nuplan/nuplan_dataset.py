@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -23,6 +24,8 @@ from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.scene_records import NuPlanSceneRecord
 from trajdata.maps.vec_map import VectorMap
 from trajdata.utils import arr_utils
+
+logger = logging.getLogger(__name__)
 
 
 class NuplanDataset(RawDataset):
@@ -71,7 +74,7 @@ class NuplanDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         if self.name == "nuplan_mini":
             subfolder = "mini"

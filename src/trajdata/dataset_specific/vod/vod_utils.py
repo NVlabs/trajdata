@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, Final, List, Tuple, Union
 
 import numpy as np
@@ -20,6 +21,8 @@ from trajdata.maps.vec_map_elements import (
     RoadLane,
 )
 from trajdata.utils import arr_utils, map_utils
+
+logger = logging.getLogger(__name__)
 
 VOD_DT: Final[float] = 0.1
 
@@ -60,7 +63,7 @@ def agg_agent_data(
 ) -> Agent:
     """Loops through all annotations of a specific agent in a scene and aggregates their data into an Agent object."""
     if agent_data["prev"]:
-        print("WARN: This is not the first frame of this agent!")
+        logger.warning("This is not the first frame of this agent!")
 
     translation_list = [np.array(agent_data["translation"][:3])[np.newaxis]]
     agent_size = agent_data["size"]

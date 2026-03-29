@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import warnings
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -89,6 +90,11 @@ class DataFrameCache(SceneCache):
 
     @staticmethod
     def _agent_data_index_file(scene_dt: float) -> str:
+        return f"scene_index_dt{scene_dt:.2f}.json"
+
+    @staticmethod
+    def _agent_data_index_file_legacy(scene_dt: float) -> str:
+        """Legacy pickle format kept for backwards compatibility with existing caches."""
         return f"scene_index_dt{scene_dt:.2f}.pkl"
 
     # AGENT STATE DATA
@@ -148,18 +154,34 @@ class DataFrameCache(SceneCache):
             use_threads=False,
         ).set_index(["agent_id", "scene_ts"])
 
-        with open(
-            self.scene_dir / DataFrameCache._agent_data_index_file(scene_dt), "rb"
-        ) as f:
-            self.index_dict: Dict[Tuple[str, int], int] = pickle.load(f)
+        json_index_path = self.scene_dir / DataFrameCache._agent_data_index_file(scene_dt)
+        pkl_index_path = self.scene_dir / DataFrameCache._agent_data_index_file_legacy(scene_dt)
+        if json_index_path.exists():
+            with open(json_index_path, "r") as f:
+                raw: Dict[str, int] = json.load(f)
+            self.index_dict: Dict[Tuple[str, int], int] = {
+                (parts[0], int(parts[1])): v
+                for k, v in raw.items()
+                for parts in [k.split("::", 1)]
+            }
+        elif pkl_index_path.exists():
+            # Legacy format: load from pickle for backwards compatibility.
+            with open(pkl_index_path, "rb") as f:
+                self.index_dict = pickle.load(f)
+        else:
+            raise FileNotFoundError(
+                f"No agent data index found at {json_index_path} or {pkl_index_path}."
+            )
 
         self._get_and_reorder_col_idxs()
 
     def write_cache_to_disk(self) -> None:
         with open(
-            self.scene_dir / DataFrameCache._agent_data_index_file(self.dt), "wb"
+            self.scene_dir / DataFrameCache._agent_data_index_file(self.dt), "w"
         ) as f:
-            pickle.dump(self.index_dict, f)
+            json.dump(
+                {f"{k[0]}::{k[1]}": v for k, v in self.index_dict.items()}, f
+            )
 
         self.scene_data_df.reset_index().to_feather(
             self.scene_dir / DataFrameCache._agent_data_file(self.dt)
@@ -180,9 +202,11 @@ class DataFrameCache(SceneCache):
             val: idx for idx, val in enumerate(agent_data.index)
         }
         with open(
-            scene_cache_dir / DataFrameCache._agent_data_index_file(scene.dt), "wb"
+            scene_cache_dir / DataFrameCache._agent_data_index_file(scene.dt), "w"
         ) as f:
-            pickle.dump(index_dict, f)
+            json.dump(
+                {f"{k[0]}::{k[1]}": v for k, v in index_dict.items()}, f
+            )
 
         agent_data.reset_index().to_feather(
             scene_cache_dir / DataFrameCache._agent_data_file(scene.dt)

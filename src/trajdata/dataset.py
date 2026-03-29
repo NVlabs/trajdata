@@ -1,5 +1,6 @@
 import gc
 import json
+import logging
 import random
 import re
 import time
@@ -50,6 +51,8 @@ from trajdata.utils import (
     string_utils,
 )
 from trajdata.utils.parallel_utils import parallel_iapply
+
+logger = logging.getLogger(__name__)
 
 
 class UnifiedDataset(Dataset):
@@ -250,10 +253,9 @@ class UnifiedDataset(Dataset):
 
         matching_datasets: List[SceneTag] = self._get_matching_scene_tags(desired_data)
         if self.verbose:
-            print(
-                "Loading data for matched scene tags:",
+            logger.info(
+                "Loading data for matched scene tags: %s",
                 string_utils.pretty_string_tags(matching_datasets),
-                flush=True,
             )
 
         self.check_args_combinations(matching_datasets)
@@ -348,7 +350,7 @@ class UnifiedDataset(Dataset):
             all_scenes_list, num_workers
         )
         if self.verbose:
-            print(len(scene_paths), "scenes in the scene index.")
+            logger.info("%d scenes in the scene index.", len(scene_paths))
 
         # Done with this list. Cutting memory usage because
         # of multiprocessing later on.
@@ -381,9 +383,8 @@ class UnifiedDataset(Dataset):
         # Use only rank 0 process for caching when using multi-GPU torch training.
         if save_index and rank == 0:
             if self._index_cache_path().exists():
-                print(
-                    "WARNING: Overwriting already-cached data index (since save_index is True).",
-                    flush=True,
+                logger.warning(
+                    "Overwriting already-cached data index (since save_index is True)."
                 )
 
             self._cache_data_index(data_index)
@@ -498,10 +499,7 @@ class UnifiedDataset(Dataset):
         with open(args_file, "w") as f:
             json.dump(index_args, f, indent=4)
 
-        print(
-            f"Cached data index to {str(index_cache_file)}",
-            flush=True,
-        )
+        logger.info("Cached data index to %s", str(index_cache_file))
 
     def _load_data_index(
         self,
@@ -514,10 +512,7 @@ class UnifiedDataset(Dataset):
             data_index = dill.load(f)
 
         if self.verbose:
-            print(
-                f"Loaded data index from {str(index_cache_file)}",
-                flush=True,
-            )
+            logger.info("Loaded data index from %s", str(index_cache_file))
 
         return data_index
 
@@ -525,11 +520,11 @@ class UnifiedDataset(Dataset):
         self, cache_path: str, num_workers=0, filter_fn=None
     ) -> None:
         if isfile(cache_path):
-            print(f"Loading cache from {cache_path} ...", end="")
+            logger.info("Loading cache from %s ...", cache_path)
             t = time.time()
             with open(cache_path, "rb") as f:
                 self._cached_batch_elements, keep_ids = dill.load(f, encoding="latin1")
-            print(f" done in {time.time() - t:.1f}s.")
+            logger.info("Cache loaded in %.1fs.", time.time() - t)
 
         else:
             # Build cache
@@ -563,11 +558,11 @@ class UnifiedDataset(Dataset):
             # not self (in case it is set to that)!
             del cache_data_iterator
 
-            print(f"Saving cache to {cache_path} ....", end="")
+            logger.info("Saving cache to %s ...", cache_path)
             t = time.time()
             with open(cache_path, "wb") as f:
                 dill.dump((cached_batch_elements, keep_ids), f)
-            print(f" done in {time.time() - t:.1f}s.")
+            logger.info("Cache saved in %.1fs.", time.time() - t)
 
             self._cached_batch_elements = cached_batch_elements
 
@@ -624,8 +619,9 @@ class UnifiedDataset(Dataset):
                     keep_count += 1
                     if max_count is not None and keep_count >= max_count:
                         # Add False for remaining samples and break loop
-                        print(
-                            f"Reached maximum number of {max_count} elements, terminating early."
+                        logger.info(
+                            "Reached maximum number of %d elements, terminating early.",
+                            max_count,
                         )
                         break
 
@@ -642,15 +638,18 @@ class UnifiedDataset(Dataset):
             # All proceses use the indices from rank 0
             self._data_index = gathered_values[0]
             self._data_len = len(self._data_index)
-            print(f"Rank {self.rank} has {self._data_len} elements.")
+            logger.info("Rank %d has %d elements.", self.rank, self._data_len)
 
     def remove_elements(self, keep_ids: Union[np.ndarray, List[int]]):
         old_len = self._data_len
         self._data_index = [self._data_index[i] for i in keep_ids]
         self._data_len = len(self._data_index)
 
-        print(
-            f"Kept {self._data_len}/{old_len} elements, {self._data_len/old_len*100.0:.2f}%."
+        logger.info(
+            "Kept %d/%d elements (%.2f%%).",
+            self._data_len,
+            old_len,
+            self._data_len / old_len * 100.0,
         )
 
     def _get_data_index(

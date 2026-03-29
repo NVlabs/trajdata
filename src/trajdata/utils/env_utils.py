@@ -55,6 +55,11 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
 
         return Av2Dataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
+    if dataset_name.startswith("csv_"):
+        from trajdata.dataset_specific.csv_dataset import CSVDataset
+
+        return CSVDataset(dataset_name, data_dir, parallelizable=True, has_maps=False)
+
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 

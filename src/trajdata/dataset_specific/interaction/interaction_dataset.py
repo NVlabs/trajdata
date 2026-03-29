@@ -1,4 +1,6 @@
+import logging
 import os
+import pickle
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +21,8 @@ from trajdata.dataset_specific.scene_records import InteractionRecord
 from trajdata.maps import VectorMap
 from trajdata.maps.vec_map_elements import Polyline, RoadLane
 from trajdata.utils import arr_utils
+
+logger = logging.getLogger(__name__)
 
 # SDD was captured at 10 frames per second.
 INTERACTION_DT: Final[float] = 0.1
@@ -137,7 +141,7 @@ class InteractionDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         data_dir_path = Path(self.metadata.data_dir)
 
@@ -167,9 +171,8 @@ class InteractionDataset(RawDataset):
             )
 
         if verbose:
-            print(
-                f"The first ~60 iterations might be slow, don't worry the following ones will be fast.",
-                flush=True,
+            logger.info(
+                "The first ~60 iterations might be slow, don't worry the following ones will be fast."
             )
 
     def _get_matching_scenes_from_obj(
@@ -281,12 +284,23 @@ class InteractionDataset(RawDataset):
         if scene_metadata_path.exists():
             # Try repeatedly to open the file because it might still be
             # being created in another process.
-            while True:
+            max_retries: int = 30
+            for attempt in range(max_retries):
                 try:
                     already_done_scene = EnvCache.load(scene_metadata_path)
                     break
-                except:
+                except (OSError, EOFError, pickle.UnpicklingError) as e:
+                    if attempt == max_retries - 1:
+                        raise RuntimeError(
+                            f"Failed to load cached scene metadata from "
+                            f"{scene_metadata_path} after {max_retries} attempts."
+                        ) from e
                     time.sleep(1)
+            else:
+                raise RuntimeError(
+                    f"Failed to load cached scene metadata from "
+                    f"{scene_metadata_path} after {max_retries} attempts."
+                )
 
             # Already processed, so we can immediately return our cached results.
             return (

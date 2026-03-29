@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
@@ -24,6 +25,8 @@ from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.scene_records import LyftSceneRecord
 from trajdata.maps import VectorMap
 from trajdata.utils import arr_utils
+
+logger = logging.getLogger(__name__)
 
 
 def const_lambda(const_val: Any) -> Any:
@@ -86,7 +89,7 @@ class LyftDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         self.dataset_obj = ChunkedDataset(str(self.metadata.data_dir)).open()
 
@@ -336,7 +339,7 @@ class LyftDataset(RawDataset):
     ) -> None:
         resolution: float = map_params["px_per_m"]
         map_name: str = "palo_alto"
-        print(f"Caching {map_name} Map at {resolution:.2f} px/m...", flush=True)
+        logger.info("Caching %s Map at %.2f px/m...", map_name, resolution)
 
         # We have to do this .parent.parent stuff because the data_dir for lyft is scenes/*.zarr
         dm = LocalDataManager((self.metadata.data_dir.parent.parent).resolve())

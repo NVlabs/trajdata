@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Dict, Final, List, Optional, Tuple, Type
 
@@ -12,6 +13,8 @@ from trajdata.data_structures.scene_tag import SceneTag
 from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.scene_records import EUPedsRecord
 from trajdata.utils import arr_utils
+
+logger = logging.getLogger(__name__)
 
 TRAIN_SCENES: Final[List[str]] = [
     "biwi_eth",
@@ -103,7 +106,7 @@ class EUPedsDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         self.dataset_obj: Dict[str, pd.DataFrame] = dict()
         for scene_name in TRAIN_SCENES:

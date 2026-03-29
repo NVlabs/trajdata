@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Type, Union
 
@@ -25,6 +26,8 @@ from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.scene_records import Argoverse2Record
 from trajdata.utils import arr_utils
 
+logger = logging.getLogger(__name__)
+
 AV2_MOTION_FORECASTING = "av2_motion_forecasting"
 AV2_DT = 1 / AV2_SCENARIO_STEP_HZ
 
@@ -47,7 +50,7 @@ class Av2Dataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
         self.dataset_obj = Av2Object(self.metadata.data_dir)
 
     def _get_matching_scenes_from_obj(

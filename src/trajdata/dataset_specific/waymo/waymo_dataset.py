@@ -1,3 +1,4 @@
+import logging
 import os
 from collections import defaultdict
 from functools import partial
@@ -44,6 +45,8 @@ from trajdata.proto.vectorized_map_pb2 import (
 from trajdata.utils import arr_utils
 from trajdata.utils.parallel_utils import parallel_apply
 
+logger = logging.getLogger(__name__)
+
 
 def const_lambda(const_val: Any) -> Any:
     return const_val
@@ -76,7 +79,7 @@ class WaymoDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
         dataset_name: str = ""
         if self.name == "waymo_train":
             dataset_name = "training"

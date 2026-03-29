@@ -16,6 +16,6 @@ jobs:
       - name: Install prerequisites (for OpenCV)
         run: apt-get update && apt-get install ffmpeg libsm6 libxext6 -y
       - name: Install trajdata base version
-        run: python -m pip install .
+        run: python -m pip install ".[dev]"
       - name: Run tests
-        run: python -m unittest tests/test_state.py
+        run: python -m pytest tests/ -v --tb=short

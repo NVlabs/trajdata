@@ -1,3 +1,4 @@
+import logging
 import warnings
 from copy import deepcopy
 from pathlib import Path
@@ -25,6 +26,8 @@ from trajdata.dataset_specific.nusc import nusc_utils
 from trajdata.dataset_specific.raw_dataset import RawDataset
 from trajdata.dataset_specific.scene_records import NuscSceneRecord
 from trajdata.maps import VectorMap
+
+logger = logging.getLogger(__name__)
 
 
 class NuscDataset(RawDataset):
@@ -91,7 +94,7 @@ class NuscDataset(RawDataset):
 
     def load_dataset_obj(self, verbose: bool = False) -> None:
         if verbose:
-            print(f"Loading {self.name} dataset...", flush=True)
+            logger.info("Loading %s dataset...", self.name)
 
         if self.name == "nusc_mini":
             version_str = "v1.0-mini"
