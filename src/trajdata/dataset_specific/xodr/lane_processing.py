@@ -86,7 +86,7 @@ def process_road(
     # Precompute widths per lane
     lane_width_samples = _compute_lane_widths(lane_offsets, s_grid)
 
-    # Process all lanes to create geometry
+    # Process all lanes to create geometry and capture outer road edges
     _process_lane_geometry(
         road_id,
         lane_offsets,
@@ -98,13 +98,11 @@ def process_road(
         center_z,
         road_headings,
         lane_geoms,
+        road_edges,
         min_xyz,
         max_xyz,
         sidewalks,
     )
-
-    # Extract and register road edges
-    _extract_road_edges(road_id, lane_offsets, lane_geoms, road_edges)
 
     # Create artificial edges for non-junction roads
     if not is_junction_road:
@@ -222,6 +220,7 @@ def _process_lane_geometry(
     center_z: np.ndarray,
     road_headings: np.ndarray,
     lane_geoms: Dict[str, LaneGeom],
+    road_edges: Dict[str, np.ndarray],
     min_xyz: np.ndarray,
     max_xyz: np.ndarray,
     sidewalks: Dict[str, np.ndarray] = None,
@@ -238,6 +237,7 @@ def _process_lane_geometry(
         center_y: Y coordinates of road centerline
         road_headings: Heading angles at each point
         lane_geoms: Dictionary with lane geometries (updated in place)
+        road_edges: Dictionary with road edge polylines (updated in place)
         min_xyz: Minimum extent (updated in place)
         max_xyz: Maximum extent (updated in place)
     """
@@ -316,6 +316,16 @@ def _process_lane_geometry(
             )
             current_edge_x, current_edge_y = outer_edge_x, outer_edge_y
 
+        # After all lanes on this side, current_edge is the outermost road edge
+        if side_ids:
+            if is_left_side:
+                # Reverse back to road reference direction
+                edge = np.stack([current_edge_x[::-1], current_edge_y[::-1], center_z], axis=1)
+                road_edges[f"{road_id}_L"] = edge
+            else:
+                edge = np.stack([current_edge_x, current_edge_y, center_z], axis=1)
+                road_edges[f"{road_id}_R"] = edge
+
 
 def _create_single_lane_geometry(
     road_id: str,
@@ -385,41 +395,6 @@ def _create_single_lane_geometry(
         direction=lane_direction,
     )
 
-
-def _extract_road_edges(
-    road_id: str,
-    lane_offsets: List[Tuple[int, List]],
-    lane_geoms: Dict[str, LaneGeom],
-    road_edges: Dict[str, np.ndarray],
-) -> None:
-    """Extract outer road edges from the outermost lanes.
-
-    Args:
-        road_id: ID of the road
-        lane_offsets: List of (lane_id, width_sections) tuples
-        lane_geoms: Dictionary of lane geometries
-        road_edges: Dictionary with road edges (updated in place)
-    """
-    # Extract edges from outermost lanes
-    left_lane_ids = [lid for lid, _ in lane_offsets if lid > 0]
-    right_lane_ids = [lid for lid, _ in lane_offsets if lid < 0]
-
-    # Try to get edges from outermost lanes first
-    if left_lane_ids:
-        outermost_left = max(left_lane_ids)
-        outermost_id = f"{road_id}_{outermost_left}"
-        if outermost_id in lane_geoms:
-            lg = lane_geoms[outermost_id]
-            if lg.left_edge is not None:
-                road_edges[f"{road_id}_L"] = lg.left_edge
-
-    if right_lane_ids:
-        outermost_right = min(right_lane_ids)
-        outermost_id = f"{road_id}_{outermost_right}"
-        if outermost_id in lane_geoms:
-            lg = lane_geoms[outermost_id]
-            if lg.right_edge is not None:
-                road_edges[f"{road_id}_R"] = lg.right_edge
 
 
 def _create_artificial_edges(
