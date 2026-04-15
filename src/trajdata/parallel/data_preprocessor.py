@@ -23,7 +23,7 @@ class ParallelDatasetPreprocessor(Dataset):
         cache_class: Type[SceneCache],
         rebuild_cache: bool,
     ) -> None:
-        self.env_cache_path = np.array(env_cache_path).astype(np.string_)
+        self.env_cache_path = np.array(env_cache_path).astype(np.bytes_)
         self.desired_dt = desired_dt
         self.cache_class = cache_class
         self.rebuild_cache = rebuild_cache
@@ -43,9 +43,9 @@ class ParallelDatasetPreprocessor(Dataset):
         )
 
         self.scene_name_idxs = np.array(scene_name_idxs, dtype=int)
-        self.env_names_arr = np.array(env_names).astype(np.string_)
-        self.scene_names_arr = np.array(scene_names).astype(np.string_)
-        self.data_dir_arr = np.array(list(envs_dir_dict.values())).astype(np.string_)
+        self.env_names_arr = np.array(env_names).astype(np.bytes_)
+        self.scene_names_arr = np.array(scene_names).astype(np.bytes_)
+        self.data_dir_arr = np.array(list(envs_dir_dict.values())).astype(np.bytes_)
 
         self.data_len: int = len(scene_info_list)
 
