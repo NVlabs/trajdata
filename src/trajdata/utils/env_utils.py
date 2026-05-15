@@ -8,12 +8,11 @@ def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDa
     Get a RawDataset instance for the specified dataset.
 
     Args:
-        dataset_name: Name of the dataset (e.g., "nuplan_mini", "usdz")
+        dataset_name: Name of the dataset (e.g., "nuplan_mini")
         data_dir: Path to the dataset directory
         **dataset_kwargs: Dataset-specific keyword arguments.
                          For Nuplan: config_dir (Path to directory containing YAML configs),
                                     num_timesteps_before, num_timesteps_after
-                         For USDZ: smooth_trajectories, etc.
 
     Returns:
         RawDataset instance for the specified dataset
@@ -68,11 +67,6 @@ def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDa
 
         return MADSDataset(dataset_name, data_dir, parallelizable=True, has_maps=True)
 
-    if "usdz" in dataset_name:
-        from trajdata.dataset_specific.usdz import UsdzDataset
-
-        return UsdzDataset(dataset_name, data_dir, parallelizable=True, has_maps=True, **dataset_kwargs)
-
     raise ValueError(f"Dataset with name '{dataset_name}' is not supported")
 
 
@@ -85,7 +79,7 @@ def get_raw_datasets(
     Args:
         data_dirs: Dictionary mapping dataset names to their data directories
         **dataset_kwargs: Dataset-specific keyword arguments in nested dict format:
-                         {'nuplan_mini': {...}, 'usdz': {...}}
+                         {'nuplan_mini': {...}}
                          Each dataset gets its own specific parameters.
 
     Returns:
