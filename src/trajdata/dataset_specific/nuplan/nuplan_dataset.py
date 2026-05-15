@@ -36,6 +36,7 @@ class NuplanDataset(RawDataset):
         num_timesteps_before: Optional[int] = None,
         num_timesteps_after: Optional[int] = None,
         use_central_tokens: bool = False,
+        **kwargs,
     ) -> None:
         """
         Args:
