@@ -111,6 +111,7 @@ def process_road(
             lane_offsets,
             center_x,
             center_y,
+            center_z,
             road_headings,
             road_edges,
         )
@@ -402,6 +403,7 @@ def _create_artificial_edges(
     lane_offsets: List[Tuple[int, List]],
     center_x: np.ndarray,
     center_y: np.ndarray,
+    center_z: np.ndarray,
     road_headings: np.ndarray,
     road_edges: Dict[str, np.ndarray],
 ) -> None:
@@ -412,6 +414,7 @@ def _create_artificial_edges(
         lane_offsets: List of (lane_id, width_sections) tuples
         center_x: X coordinates of road centerline
         center_y: Y coordinates of road centerline
+        center_z: Z coordinates of road centerline
         road_headings: Heading angles along the road
         road_edges: Dictionary to update with artificial edges
     """
@@ -441,7 +444,7 @@ def _create_artificial_edges(
             [
                 artificial_left_x,
                 artificial_left_y,
-                np.zeros_like(artificial_left_x),
+                center_z,
             ],
             axis=1,
         )
@@ -460,7 +463,7 @@ def _create_artificial_edges(
             [
                 artificial_right_x,
                 artificial_right_y,
-                np.zeros_like(artificial_right_x),
+                center_z,
             ],
             axis=1,
         )
