@@ -4,7 +4,6 @@ import random
 import time
 from collections import defaultdict
 from functools import partial
-from itertools import chain
 from os.path import isfile
 from pathlib import Path
 from typing import (
@@ -1014,6 +1013,27 @@ class UnifiedDataset(Dataset):
 
         return scene_paths
 
+    @property
+    def scene_name_to_index(self) -> Dict[str, int]:
+        """Return a mapping from cached scene name to dataset scene index."""
+        return {
+            scene_path.parent.name: idx
+            for idx, scene_path in enumerate(self._scene_index)
+        }
+
+    @property
+    def map_api(self) -> Optional[MapAPI]:
+        """Return the dataset map API when vector maps are enabled."""
+        return self._map_api
+
+    def get_scene_cache(self, scene: Scene) -> SceneCache:
+        """Create a cache object for a scene using this dataset's cache settings."""
+        scene_cache: SceneCache = self.cache_class(
+            self.cache_path, scene, self.augmentations
+        )
+        scene_cache.set_obs_format(self.obs_format)
+        return scene_cache
+
     def get_scene(self, scene_idx: int) -> Scene:
         scene: Scene = EnvCache.load(self._scene_index[scene_idx])
         scene_utils.enforce_desired_dt(scene, self.desired_dt)
@@ -1044,10 +1064,7 @@ class UnifiedDataset(Dataset):
 
         scene: Scene = EnvCache.load(scene_path)
         scene_utils.enforce_desired_dt(scene, self.desired_dt)
-        scene_cache: SceneCache = self.cache_class(
-            self.cache_path, scene, self.augmentations
-        )
-        scene_cache.set_obs_format(self.obs_format)
+        scene_cache = self.get_scene_cache(scene)
 
         if self.centric == "scene":
             scene_time: SceneTime = SceneTime.from_cache(
