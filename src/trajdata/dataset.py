@@ -258,11 +258,9 @@ class UnifiedDataset(Dataset):
                 s.lower() for s in self.scene_description_contains
             ]
 
-        # Pass dataset-specific kwargs to raw datasets
-        dataset_kwargs = dataset_kwargs or {}
-        self.dataset_kwargs = dataset_kwargs  # Save for later use in parallel preprocessing
+        self.dataset_kwargs = dataset_kwargs or {}
         self.envs: List[RawDataset] = env_utils.get_raw_datasets(
-            data_dirs, **dataset_kwargs
+            data_dirs, **self.dataset_kwargs
         )
         self.envs_dict: Dict[str, RawDataset] = {env.name: env for env in self.envs}
 
@@ -312,7 +310,6 @@ class UnifiedDataset(Dataset):
                                 self.cache_path,
                                 env.name,
                                 scene.location,
-                                self.raster_map_params["px_per_m"],
                             )
                             for scene in scenes_list
                         )
@@ -1017,7 +1014,7 @@ class UnifiedDataset(Dataset):
     def scene_name_to_index(self) -> Dict[str, int]:
         """Return a mapping from cached scene name to dataset scene index."""
         return {
-            scene_path.parent.name: idx
+            Path(scene_path).parent.name: idx
             for idx, scene_path in enumerate(self._scene_index)
         }
 

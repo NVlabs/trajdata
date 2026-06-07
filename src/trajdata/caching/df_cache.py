@@ -719,7 +719,7 @@ class DataFrameCache(SceneCache):
 
     @staticmethod
     def is_map_cached(
-        cache_path: Path, env_name: str, map_name: str, resolution: float
+        cache_path: Path, env_name: str, map_name: str
     ) -> bool:
         (
             maps_path,

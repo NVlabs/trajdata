@@ -1,4 +1,5 @@
 import glob
+import logging
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
@@ -26,6 +27,8 @@ from trajdata.maps.vec_map_elements import (
 from trajdata.utils import map_utils
 from trajdata.maps.vec_map import split_lane_segments
 
+logger = logging.getLogger(__name__)
+
 NUPLAN_DT: Final[float] = 0.05
 NUPLAN_FULL_MAP_NAME_DICT: Final[Dict[str, str]] = {
     "boston": "us-ma-boston",
@@ -49,6 +52,9 @@ NUPLAN_TRAFFIC_STATUS_DICT: Final[Dict[str, TrafficLightStatus]] = {
     "red": TrafficLightStatus.RED,
     "unknown": TrafficLightStatus.UNKNOWN,
 }
+# Lidar-to-ego extrinsics for the NuPlan real split (trainval/test).
+# Source: NuPlan devkit sensor calibration; verify against your dataset version
+# if using a different split or sensor configuration.
 NUPLAN_REAL_LIDAR2EGO_ROTATION = [-0.0016505558783280307, -0.00023289146777086609, 0.003725490480134295, 0.9999916710390838]
 NUPLAN_REAL_LIDAR2EGO_TRANSLATION = [1.5185133218765259, 0.0, 1.6308990716934204]
 
@@ -61,7 +67,6 @@ class NuPlanObject:
         central_tokens_config: Optional[List[Dict[str, Any]]] = None,
         num_timesteps_before: int = 30,
         num_timesteps_after: int = 80,
-        use_central_tokens: bool = False,
     ) -> None:
         """
         Args:
@@ -70,7 +75,6 @@ class NuPlanObject:
             central_tokens_config: Optional list of central tokens configurations.
             num_timesteps_before: Default number of timesteps before the central token.
             num_timesteps_after: Default number of timesteps after the central token.
-            use_central_tokens: Whether to use central token mode (default: False for backward compatibility).
         """
         self.base_path: Path = dataset_path / subfolder
 
@@ -79,23 +83,17 @@ class NuPlanObject:
 
         self.num_timesteps_before = num_timesteps_before
         self.num_timesteps_after = num_timesteps_after
-        self.use_central_tokens = use_central_tokens
-
-        # Auto-enable central token mode if config is provided
-        if central_tokens_config is not None:
-            self.use_central_tokens = True
-
-        # Prepare central tokens config if in central token mode
-        if self.use_central_tokens and central_tokens_config is not None:
-            self.central_tokens_config = central_tokens_config
-        else:
-            self.central_tokens_config = []
+        self.central_tokens_config: List[Dict[str, Any]] = central_tokens_config or []
 
         # Load scenes based on mode
         if self.use_central_tokens:
             self.scenes: List[Dict[str, str]] = self._load_scenes_from_central_tokens()
         else:
             self.scenes: List[Dict[str, str]] = self._load_scenes()
+
+    @property
+    def use_central_tokens(self) -> bool:
+        return bool(self.central_tokens_config)
 
     def open_db(self, db_filename: str) -> None:
         self.connection = sqlite3.connect(str(self.base_path / db_filename))
@@ -447,7 +445,10 @@ class NuPlanObject:
         }
         try:
             import pickle
-            
+            # NuPlan stores camera calibration as pickled objects in SQLite.
+            # We treat the raw NuPlan DB as trusted input; do not use this
+            # code path with untrusted database files.
+
             # Check whether the database connection is already open.
             if not self.connection.in_transaction:
                 db_path = self.base_path / f"{log_filename}.db"
@@ -457,7 +458,7 @@ class NuPlanObject:
                 should_close = True
             else:
                 should_close = False
-            
+
             # Query log token.
             log_query = "SELECT token FROM log WHERE logfile = ?"
             log_row = self.execute_query_one(log_query, (log_filename,))
@@ -465,9 +466,9 @@ class NuPlanObject:
                 if should_close:
                     self.close_db()
                 return sensor_calib
-            
+
             log_token = log_row['token']
-            
+
             # Query the camera table (if it exists).
             try:
                 camera_query = """
@@ -476,10 +477,10 @@ class NuPlanObject:
                 WHERE log_token = ?
                 """
                 camera_rows = self.execute_query_all(camera_query, (log_token,))
-                
+
                 for row in camera_rows:
                     cam_name = row['channel']
-                    
+
                     # Parse pickle serialized data.
                     try:
                         # translation is nuplan.database.common.data_types.Translation.
@@ -487,27 +488,27 @@ class NuPlanObject:
                         if hasattr(trans_obj, '__iter__') and not isinstance(trans_obj, str):
                             translation = np.array(list(trans_obj))
                         else:
-                            translation = np.array([trans_obj.x, trans_obj.y, trans_obj.z]) if hasattr(trans_obj, 'x') else np.array([0.0, 0.0, 0.0])
+                            translation = np.array([trans_obj.x, trans_obj.y, trans_obj.z]) if hasattr(trans_obj, 'x') else None
                     except Exception:
-                        translation = np.array([0.0, 0.0, 0.0])
-                    
+                        logger.warning("Failed to parse translation for camera %s in %s", cam_name, log_filename)
+                        translation = None
+
                     try:
                         # rotation is nuplan.database.common.data_types.Rotation (quaternion).
                         rot_obj = pickle.loads(row['rotation'])
                         if hasattr(rot_obj, '__iter__') and not isinstance(rot_obj, str):
                             rotation = np.array(list(rot_obj))
+                        elif hasattr(rot_obj, 'w'):
+                            rotation = np.array([rot_obj.w, rot_obj.x, rot_obj.y, rot_obj.z])
+                        elif hasattr(rot_obj, 'quaternion'):
+                            q = rot_obj.quaternion
+                            rotation = np.array([q.w, q.x, q.y, q.z]) if hasattr(q, 'w') else None
                         else:
-                            # Try to get quaternion components.
-                            if hasattr(rot_obj, 'quaternion'):
-                                q = rot_obj.quaternion
-                                rotation = np.array([q.w, q.x, q.y, q.z]) if hasattr(q, 'w') else np.array([q.x, q.y, q.z, q.w])
-                            elif hasattr(rot_obj, 'w'):
-                                rotation = np.array([rot_obj.w, rot_obj.x, rot_obj.y, rot_obj.z])
-                            else:
-                                rotation = np.array([1.0, 0.0, 0.0, 0.0])
+                            rotation = None
                     except Exception:
-                        rotation = np.array([1.0, 0.0, 0.0, 0.0])
-                    
+                        logger.warning("Failed to parse rotation for camera %s in %s", cam_name, log_filename)
+                        rotation = None
+
                     try:
                         # intrinsic is nuplan.database.common.data_types.CameraIntrinsic.
                         intrinsic_obj = pickle.loads(row['intrinsic'])
@@ -516,13 +517,14 @@ class NuPlanObject:
                         elif hasattr(intrinsic_obj, '__iter__') and not isinstance(intrinsic_obj, str):
                             intrinsic = np.array(intrinsic_obj)
                         else:
-                            intrinsic = np.array([[1545.0, 0.0, 960.0], [0.0, 1545.0, 560.0], [0.0, 0.0, 1.0]])
+                            intrinsic = None
                         # Ensure it is a 3x3 matrix.
-                        if intrinsic.shape != (3, 3):
-                            intrinsic = intrinsic.reshape(3, 3) if intrinsic.size == 9 else np.array([[1545.0, 0.0, 960.0], [0.0, 1545.0, 560.0], [0.0, 0.0, 1.0]])
+                        if intrinsic is not None and intrinsic.shape != (3, 3):
+                            intrinsic = intrinsic.reshape(3, 3) if intrinsic.size == 9 else None
                     except Exception:
-                        intrinsic = np.array([[1545.0, 0.0, 960.0], [0.0, 1545.0, 560.0], [0.0, 0.0, 1.0]])
-                    
+                        logger.warning("Failed to parse intrinsic for camera %s in %s", cam_name, log_filename)
+                        intrinsic = None
+
                     try:
                         # distortion is a list.
                         distortion_obj = pickle.loads(row['distortion'])
@@ -531,10 +533,11 @@ class NuPlanObject:
                         elif isinstance(distortion_obj, (list, tuple)):
                             distortion = np.array(distortion_obj)
                         else:
-                            distortion = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+                            distortion = None
                     except Exception:
-                        distortion = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
-                    
+                        logger.warning("Failed to parse distortion for camera %s in %s", cam_name, log_filename)
+                        distortion = None
+
                     sensor_calib['cameras'][cam_name] = {
                         'channel': cam_name,
                         'sensor2ego_rotation': rotation,
@@ -544,14 +547,14 @@ class NuPlanObject:
                         'height': 1080,
                         'width': 1920,
                     }
-            except sqlite3.OperationalError as e:
-                pass
-            except Exception as e:
-                pass
-            
-        except Exception as e:
-            pass
-        
+            except sqlite3.OperationalError:
+                logger.debug("Camera table not found in %s.db, skipping camera calibration", log_filename)
+            except Exception:
+                logger.warning("Unexpected error reading camera calibration from %s.db", log_filename, exc_info=True)
+
+        except Exception:
+            logger.warning("Failed to load sensor calibration for %s", log_filename, exc_info=True)
+
         return sensor_calib
 
     def close_db(self) -> None:
