@@ -445,9 +445,11 @@ class NuPlanObject:
         }
         try:
             import pickle
-            # NuPlan stores camera calibration as pickled objects in SQLite.
-            # We treat the raw NuPlan DB as trusted input; do not use this
-            # code path with untrusted database files.
+            # NuPlan stores these camera calibration fields as pickle-backed SQL
+            # columns in the official ORM. See nuplan.database.common.sql_types
+            # SimplePickleType and nuplan.database.nuplan_db_orm.camera.Camera.
+            # This mirrors the official deserialization path, so the NuPlan SQLite
+            # DB is treated as trusted input and must not be an arbitrary DB file.
 
             # Check whether the database connection is already open.
             if not self.connection.in_transaction:

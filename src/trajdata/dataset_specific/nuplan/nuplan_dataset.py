@@ -35,7 +35,6 @@ class NuplanDataset(RawDataset):
         central_tokens_config: Optional[List[Dict[str, Any]]] = None,
         num_timesteps_before: Optional[int] = None,
         num_timesteps_after: Optional[int] = None,
-        **kwargs,
     ) -> None:
         """
         Args:
@@ -46,6 +45,12 @@ class NuplanDataset(RawDataset):
             central_tokens_config: Optional central tokens configuration
             num_timesteps_before: Number of timesteps before central token
             num_timesteps_after: Number of timesteps after central token
+
+        Note:
+            The cache key is based solely on env_name. If you change
+            central_tokens_config, num_timesteps_before, or num_timesteps_after
+            after an initial cache build, pass rebuild_cache=True to
+            UnifiedDataset to avoid stale cached data being silently reused.
         """
         super().__init__(env_name, data_dir, parallelizable, has_maps)
         self._central_tokens_config = central_tokens_config
