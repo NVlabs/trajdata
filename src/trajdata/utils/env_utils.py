@@ -3,6 +3,11 @@ from typing import Any, Dict, List
 from trajdata.dataset_specific import RawDataset
 
 
+_NUPLAN_VALID_KWARGS = frozenset(
+    {"central_tokens_config", "num_timesteps_before", "num_timesteps_after"}
+)
+
+
 def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDataset:
     """
     Get a RawDataset instance for the specified dataset.
@@ -11,8 +16,11 @@ def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDa
         dataset_name: Name of the dataset (e.g., "nuplan_mini")
         data_dir: Path to the dataset directory
         **dataset_kwargs: Dataset-specific keyword arguments.
-                         For Nuplan: config_dir (Path to directory containing YAML configs),
-                                    num_timesteps_before, num_timesteps_after
+                         For Nuplan: central_tokens_config, num_timesteps_before,
+                                    num_timesteps_after.
+                         Unknown keys (e.g. config_dir, asset_base_path) are silently
+                         ignored — callers are responsible for converting config_dir to
+                         central_tokens_config before passing dataset_kwargs.
 
     Returns:
         RawDataset instance for the specified dataset
@@ -47,8 +55,9 @@ def get_raw_dataset(dataset_name: str, data_dir: str, **dataset_kwargs) -> RawDa
     if "nuplan" in dataset_name:
         from trajdata.dataset_specific.nuplan import NuplanDataset
 
+        nuplan_kwargs = {k: v for k, v in dataset_kwargs.items() if k in _NUPLAN_VALID_KWARGS}
         return NuplanDataset(
-            dataset_name, data_dir, parallelizable=True, has_maps=True, **dataset_kwargs
+            dataset_name, data_dir, parallelizable=True, has_maps=True, **nuplan_kwargs
         )
 
     if "waymo" in dataset_name:
