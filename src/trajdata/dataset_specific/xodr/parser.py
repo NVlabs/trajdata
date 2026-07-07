@@ -141,7 +141,7 @@ def _parse_crosswalks(
     road_id = road.attrib["id"]
 
     # Sample road centerline for s/t to xyz conversion
-    center_x, center_y, center_z, road_headings = sample_centerline(road, resolution)
+    center_x, center_y, center_z, road_headings, _ = sample_centerline(road, resolution)
     if center_x.size == 0:
         return min_xyz, max_xyz
 
@@ -272,7 +272,9 @@ def _parse_neighbor_lanes(root: ET.Element, lane_geoms: Dict[str, LaneGeom]) -> 
                             if direction == "forward":
                                 lg.left_neighbor_forward.add(f"{road_id}_{neighbor_id}")
                             elif direction == "backward":
-                                lg.left_neighbor_backward.add(f"{road_id}_{neighbor_id}")
+                                lg.left_neighbor_backward.add(
+                                    f"{road_id}_{neighbor_id}"
+                                )
 
                     # Right neighbor
                     right_elem = link_elem.find("right")
@@ -281,6 +283,10 @@ def _parse_neighbor_lanes(root: ET.Element, lane_geoms: Dict[str, LaneGeom]) -> 
                         if neighbor_id:
                             direction = right_elem.attrib.get("direction", "forward")
                             if direction == "forward":
-                                lg.right_neighbor_forward.add(f"{road_id}_{neighbor_id}")
+                                lg.right_neighbor_forward.add(
+                                    f"{road_id}_{neighbor_id}"
+                                )
                             elif direction == "backward":
-                                lg.right_neighbor_backward.add(f"{road_id}_{neighbor_id}")
+                                lg.right_neighbor_backward.add(
+                                    f"{road_id}_{neighbor_id}"
+                                )

@@ -59,7 +59,9 @@ def process_road(
     is_junction_road = road.attrib.get("junction", "-1") != "-1"
 
     # Sample the road centerline
-    center_x, center_y, center_z, road_headings = sample_centerline(road, resolution)
+    center_x, center_y, center_z, road_headings, s_grid = sample_centerline(
+        road, resolution
+    )
     if center_x.size == 0:
         return min_xyz, max_xyz  # Nothing to do
 
@@ -74,9 +76,6 @@ def process_road(
     lane_offsets, lane_types, lane_directions = gather_lane_offsets_all_sections(
         lane_elem_lanes
     )
-
-    # Build width samples along s grid
-    s_grid = np.arange(center_x.shape[0]) * resolution
 
     # Apply lane offset to centerline
     center_x, center_y = _apply_lane_offset(
@@ -245,8 +244,10 @@ def _process_lane_geometry(
     # Process left side (positive IDs) and right side (negative IDs) separately
     # Both are processed from inside out (centerline -> outer edge)
     left_lane_ids = sorted([lid for lid, _ in lane_offsets if lid > 0])  # [1, 2, 3...]
-    right_lane_ids = sorted([lid for lid, _ in lane_offsets if lid < 0], reverse=True)  # [-1, -2, -3...]
-    
+    right_lane_ids = sorted(
+        [lid for lid, _ in lane_offsets if lid < 0], reverse=True
+    )  # [-1, -2, -3...]
+
     for is_left_side, side_ids in [(True, left_lane_ids), (False, right_lane_ids)]:
         if is_left_side:
             # For left lanes, start from reversed centerline since they flow opposite
@@ -321,7 +322,9 @@ def _process_lane_geometry(
         if side_ids:
             if is_left_side:
                 # Reverse back to road reference direction
-                edge = np.stack([current_edge_x[::-1], current_edge_y[::-1], center_z], axis=1)
+                edge = np.stack(
+                    [current_edge_x[::-1], current_edge_y[::-1], center_z], axis=1
+                )
                 road_edges[f"{road_id}_L"] = edge
             else:
                 edge = np.stack([current_edge_x, current_edge_y, center_z], axis=1)
@@ -372,7 +375,7 @@ def _create_single_lane_geometry(
 
     # Build 3D coordinates using actual elevation data
     xyz_center = np.stack([mid_x, mid_y, center_z], axis=1)
-    
+
     # Assign edges
     # For right lanes: current edge is inner (left), outer edge is outer (right)
     # For left lanes: with pre-reversed geometry, we use the same assignment
@@ -395,7 +398,6 @@ def _create_single_lane_geometry(
         is_left=lane_id > 0,
         direction=lane_direction,
     )
-
 
 
 def _create_artificial_edges(
