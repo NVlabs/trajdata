@@ -15,7 +15,7 @@ import numpy as np
 
 def sample_centerline(
     road: ET.Element, resolution: float
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sample the road centerline including elevation profile.
 
     This function processes both the planView (2D geometry) and elevationProfile
@@ -31,12 +31,13 @@ def sample_centerline(
         - y_coords: Array of y-coordinates in the road's coordinate system
         - z_coords: Array of z-coordinates (elevations) from elevation profile
         - headings: Array of heading angles in radians at each sample point
+        - s_coords: Array of actual longitudinal positions along the road
 
-        All arrays have the same length and empty arrays if no geometry is found.
+        All arrays have the same length, or are empty if no geometry is found.
     """
     plan_view = road.find("planView")
     if plan_view is None:
-        return np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
+        return np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
 
     # Parse elevation profile
     elevation_profile = road.find("elevationProfile")
@@ -58,6 +59,7 @@ def sample_centerline(
     center_ys: List[float] = []
     center_zs: List[float] = []
     headings: List[float] = []
+    center_ss: List[float] = []
     cumulative_s = 0.0
 
     for geom in plan_view.findall("geometry"):
@@ -115,6 +117,7 @@ def sample_centerline(
         center_ys.extend(ys.tolist())
         center_zs.extend(zs.tolist())
         headings.extend(hdgs.tolist())
+        center_ss.extend((cumulative_s + s_values).tolist())
 
         cumulative_s += geom_len
 
@@ -123,6 +126,7 @@ def sample_centerline(
         np.asarray(center_ys),
         np.asarray(center_zs),
         np.asarray(headings),
+        np.asarray(center_ss),
     )
 
 

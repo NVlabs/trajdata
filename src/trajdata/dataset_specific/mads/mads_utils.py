@@ -245,7 +245,9 @@ def find_wait_lines_parquet(df_wait_line: pd.DataFrame, clip_id: str) -> Dict[st
         ]  # Yield/Stop
         wait_lines_dict[wait_line_id]["implicit"] = df_wait_line[
             "WaitLine.is_implicit"
-        ][i]  # TODO: need to clarify what this specifically refers to
+        ][
+            i
+        ]  # TODO: need to clarify what this specifically refers to
     return wait_lines_dict
 
 
@@ -275,6 +277,17 @@ def interpolate_points(list1, list2):
     return longer, interpolated_points
 
 
+def _prepare_wait_lines(df_wait_line: pd.DataFrame) -> pd.DataFrame:
+    """Drop wait lines without map IDs and derive their associated lane IDs."""
+    df_wait_line = df_wait_line[df_wait_line["key.map_id"].notna()].reset_index(
+        drop=True
+    )
+    df_wait_line["lane.map_id"] = df_wait_line["key.map_id"].map(
+        lambda wait_line_id: wait_line_id.split("-")[1]
+    )
+    return df_wait_line
+
+
 def populate_vector_map(vector_map: VectorMap, map_root) -> None:
     # populate vector map from mads parquet files
     # map label schema: https://docs.nvda.ai/ndas/avdnn/latest/reference/maglev/data/clip/reference/schemas/labels.html?#map-derived-labels
@@ -294,12 +307,8 @@ def populate_vector_map(vector_map: VectorMap, map_root) -> None:
     )
     # TODO: invalid traffic light data from mads
     # df_traffic_light = pd.read_parquet(os.path.join(map_root, "traffic_light.parquet"))
-    df_wait_line = df_expand_json(
-        pd.read_parquet(os.path.join(map_root, "wait_line.parquet"))
-    )
-    # wait_line id is formatted as {wait_line_id}-{lane_id}
-    df_wait_line["lane.map_id"] = df_wait_line["key.map_id"].map(
-        lambda x: x.split("-")[1]
+    df_wait_line = _prepare_wait_lines(
+        df_expand_json(pd.read_parquet(os.path.join(map_root, "wait_line.parquet")))
     )
     clip_id = df_meta["key.clip_id"][0]
     all_lanes_dict = find_lane_polylines_parquet(

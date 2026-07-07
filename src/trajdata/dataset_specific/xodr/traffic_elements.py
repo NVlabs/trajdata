@@ -63,7 +63,7 @@ def parse_traffic_infrastructure(
         road_id = road.attrib["id"]
 
         # Get the road centerline (reference line)
-        center_x, center_y, center_z, road_headings = sample_centerline(
+        center_x, center_y, center_z, road_headings, _ = sample_centerline(
             road, resolution
         )
         if center_x.size == 0:
