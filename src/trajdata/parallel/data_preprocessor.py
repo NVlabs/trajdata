@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import numpy as np
 from torch.utils.data import Dataset
@@ -22,11 +22,13 @@ class ParallelDatasetPreprocessor(Dataset):
         desired_dt: Optional[float],
         cache_class: Type[SceneCache],
         rebuild_cache: bool,
+        dataset_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.env_cache_path = np.array(env_cache_path).astype(np.bytes_)
         self.desired_dt = desired_dt
         self.cache_class = cache_class
         self.rebuild_cache = rebuild_cache
+        self.dataset_kwargs = dataset_kwargs or {}
 
         env_names: List[str] = list(envs_dir_dict.keys())
         scene_idxs_names: List[Tuple[int, str]] = [
@@ -60,8 +62,14 @@ class ParallelDatasetPreprocessor(Dataset):
         scene_idx: int = self.scene_name_idxs[idx]
 
         env_name: str = str(self.env_names_arr[env_idx], encoding="utf-8")
+
+        # Extract dataset-specific kwargs (empty dict if not specified)
+        # Note: For nuplan datasets, config_dir has been converted to central_tokens_config
+        # in the main process to avoid repeatedly loading YAML files in each worker
+        specific_kwargs = self.dataset_kwargs.get(env_name, {})
+
         raw_dataset = env_utils.get_raw_dataset(
-            env_name, str(self.data_dir_arr[env_idx], encoding="utf-8")
+            env_name, str(self.data_dir_arr[env_idx], encoding="utf-8"), **specific_kwargs
         )
 
         scene_name: str = str(self.scene_names_arr[scene_idx], encoding="utf-8")

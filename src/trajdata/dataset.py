@@ -4,7 +4,6 @@ import random
 import time
 from collections import defaultdict
 from functools import partial
-from itertools import chain
 from os.path import isfile
 from pathlib import Path
 from typing import (
@@ -100,6 +99,7 @@ class UnifiedDataset(Dataset):
         max_agent_num: Optional[int] = None,
         max_neighbor_num: Optional[int] = None,
         ego_only: Optional[bool] = False,
+        dataset_kwargs: Optional[Dict[str, Any]] = None,
         data_dirs: Dict[str, str] = {
             "eupeds_eth": "~/datasets/eth_ucy_peds",
             "eupeds_hotel": "~/datasets/eth_ucy_peds",
@@ -258,7 +258,10 @@ class UnifiedDataset(Dataset):
                 s.lower() for s in self.scene_description_contains
             ]
 
-        self.envs: List[RawDataset] = env_utils.get_raw_datasets(data_dirs)
+        self.dataset_kwargs = dataset_kwargs or {}
+        self.envs: List[RawDataset] = env_utils.get_raw_datasets(
+            data_dirs, **self.dataset_kwargs
+        )
         self.envs_dict: Dict[str, RawDataset] = {env.name: env for env in self.envs}
 
         matching_datasets: List[SceneTag] = self._get_matching_scene_tags(desired_data)
@@ -273,7 +276,7 @@ class UnifiedDataset(Dataset):
         if self.incl_vector_map:
             self._map_api = MapAPI(
                 self.cache_path,
-                keep_in_memory=vector_map_params.get("keep_in_memory", True),
+                keep_in_memory=self.vector_map_params.get("keep_in_memory", True),
             )
 
         self.cache_lane_graphs = cache_lane_graphs
@@ -307,7 +310,6 @@ class UnifiedDataset(Dataset):
                                 self.cache_path,
                                 env.name,
                                 scene.location,
-                                self.raster_map_params["px_per_m"],
                             )
                             for scene in scenes_list
                         )
@@ -974,6 +976,7 @@ class UnifiedDataset(Dataset):
                 self.desired_dt,
                 self.cache_class,
                 self.rebuild_cache,
+                self.dataset_kwargs,
             )
 
             # Done with this list. Cutting memory usage because
@@ -1007,6 +1010,27 @@ class UnifiedDataset(Dataset):
 
         return scene_paths
 
+    @property
+    def scene_name_to_index(self) -> Dict[str, int]:
+        """Return a mapping from cached scene name to dataset scene index."""
+        return {
+            Path(scene_path).parent.name: idx
+            for idx, scene_path in enumerate(self._scene_index)
+        }
+
+    @property
+    def map_api(self) -> Optional[MapAPI]:
+        """Return the dataset map API when vector maps are enabled."""
+        return self._map_api
+
+    def get_scene_cache(self, scene: Scene) -> SceneCache:
+        """Create a cache object for a scene using this dataset's cache settings."""
+        scene_cache: SceneCache = self.cache_class(
+            self.cache_path, scene, self.augmentations
+        )
+        scene_cache.set_obs_format(self.obs_format)
+        return scene_cache
+
     def get_scene(self, scene_idx: int) -> Scene:
         scene: Scene = EnvCache.load(self._scene_index[scene_idx])
         scene_utils.enforce_desired_dt(scene, self.desired_dt)
@@ -1037,10 +1061,7 @@ class UnifiedDataset(Dataset):
 
         scene: Scene = EnvCache.load(scene_path)
         scene_utils.enforce_desired_dt(scene, self.desired_dt)
-        scene_cache: SceneCache = self.cache_class(
-            self.cache_path, scene, self.augmentations
-        )
-        scene_cache.set_obs_format(self.obs_format)
+        scene_cache = self.get_scene_cache(scene)
 
         if self.centric == "scene":
             scene_time: SceneTime = SceneTime.from_cache(

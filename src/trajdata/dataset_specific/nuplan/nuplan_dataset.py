@@ -26,6 +26,40 @@ from trajdata.utils import arr_utils
 
 
 class NuplanDataset(RawDataset):
+    def __init__(
+        self,
+        env_name: str,
+        data_dir: str,
+        parallelizable: bool = True,
+        has_maps: bool = True,
+        central_tokens_config: Optional[List[Dict[str, Any]]] = None,
+        num_timesteps_before: Optional[int] = None,
+        num_timesteps_after: Optional[int] = None,
+    ) -> None:
+        """
+        Args:
+            env_name: Dataset name
+            data_dir: Data directory path
+            parallelizable: Whether dataset is parallelizable
+            has_maps: Whether dataset has maps
+            central_tokens_config: Optional central tokens configuration
+            num_timesteps_before: Number of timesteps before central token
+            num_timesteps_after: Number of timesteps after central token
+
+        Note:
+            The cache key is based solely on env_name. If you change
+            central_tokens_config, num_timesteps_before, or num_timesteps_after
+            after an initial cache build, pass rebuild_cache=True to
+            UnifiedDataset to avoid stale cached data being silently reused.
+        """
+        super().__init__(env_name, data_dir, parallelizable, has_maps)
+        self._central_tokens_config = central_tokens_config
+        self._num_timesteps_before = num_timesteps_before if num_timesteps_before is not None else 30
+        self._num_timesteps_after = num_timesteps_after if num_timesteps_after is not None else 80
+
+    @property
+    def use_central_tokens(self) -> bool:
+        return bool(self._central_tokens_config)
     def compute_metadata(self, env_name: str, data_dir: str) -> EnvMetadata:
         all_log_splits: Dict[str, List[str]] = nuplan_utils.create_splits_logs()
 
@@ -75,10 +109,30 @@ class NuplanDataset(RawDataset):
 
         if self.name == "nuplan_mini":
             subfolder = "mini"
+        elif self.name == "nuplan_test":
+            subfolder = "test"
         elif self.name.startswith("nuplan"):
             subfolder = "trainval"
 
-        self.dataset_obj = nuplan_utils.NuPlanObject(self.metadata.data_dir, subfolder)
+        # Create NuPlanObject with central token configuration
+        self.dataset_obj = nuplan_utils.NuPlanObject(
+            self.metadata.data_dir,
+            subfolder,
+            central_tokens_config=self._central_tokens_config,
+            num_timesteps_before=self._num_timesteps_before,
+            num_timesteps_after=self._num_timesteps_after,
+        )
+
+    def _get_log_name_from_scene_name(self, scene_name: str) -> str:
+        """Extract originating log name from scene name.
+
+        Supports both formats:
+        - Old format: logfile=token
+        - New format: logfile-token
+        """
+        if "=" in scene_name:
+            return scene_name.split("=")[0]
+        return scene_name.rsplit("-", 1)[0]
 
     def _get_matching_scenes_from_obj(
         self,
@@ -93,7 +147,7 @@ class NuplanDataset(RawDataset):
         scenes_list: List[SceneMetadata] = list()
         for idx, scene_record in enumerate(self.dataset_obj.scenes):
             scene_name: str = scene_record["name"]
-            originating_log: str = scene_name.split("=")[0]
+            originating_log: str = self._get_log_name_from_scene_name(scene_name)
             # scene_desc: str = scene_record["description"].lower()
             scene_location: str = scene_record["location"]
             scene_split: str = self.metadata.scene_split_map.get(
@@ -194,13 +248,15 @@ class NuplanDataset(RawDataset):
         scene_record: Dict[str, str] = self.dataset_obj.scenes[data_idx]
 
         scene_name: str = scene_record["name"]
-        originating_log: str = scene_name.split("=")[0]
+        originating_log: str = self._get_log_name_from_scene_name(scene_name)
         # scene_desc: str = scene_record["description"].lower()
         scene_location: str = scene_record["location"]
         scene_split: str = self.metadata.scene_split_map.get(
             originating_log, default_split
         )
         scene_length: int = scene_record["num_timesteps"]
+
+        data_access_info = dict(scene_record)
 
         return Scene(
             self.metadata,
@@ -209,7 +265,7 @@ class NuplanDataset(RawDataset):
             scene_split,
             scene_length,
             data_idx,
-            scene_record,
+            data_access_info,
             # scene_desc,
         )
 
@@ -217,7 +273,8 @@ class NuplanDataset(RawDataset):
         self, scene: Scene, cache_path: Path, cache_class: Type[SceneCache]
     ) -> Tuple[List[AgentMetadata], List[List[AgentMetadata]]]:
         # instantiate VectorMap from map_api if necessary
-        self.dataset_obj.open_db(scene.name.split("=")[0] + ".db")
+        log_filename = self._get_log_name_from_scene_name(scene.name)
+        self.dataset_obj.open_db(log_filename + ".db")
 
         ego_agent_info: AgentMetadata = AgentMetadata(
             name="ego",
@@ -233,6 +290,7 @@ class NuplanDataset(RawDataset):
             [ego_agent_info] for _ in range(scene.length_timesteps)
         ]
 
+        # Automatically select the correct method based on scene type
         all_frames: pd.DataFrame = self.dataset_obj.get_scene_frames(scene)
 
         ego_df = (
@@ -251,6 +309,21 @@ class NuplanDataset(RawDataset):
         lpc_tokens: List[bytearray] = all_frames.index.tolist()
         agents_df: pd.DataFrame = self.dataset_obj.get_detected_agents(lpc_tokens)
         tls_df: pd.DataFrame = self.dataset_obj.get_traffic_light_status(lpc_tokens)
+
+        # Extract sensor calibration information.
+        log_filename = self._get_log_name_from_scene_name(scene.name)
+        sensor_calib = self.dataset_obj.get_sensor_calibration(log_filename)
+        
+        # Store calibration information into Scene.data_access_info.
+        if scene.data_access_info is None:
+            scene.data_access_info = {}
+        elif not isinstance(scene.data_access_info, dict):
+            raise TypeError(
+                f"scene.data_access_info must be a dict, got "
+                f"{type(scene.data_access_info).__name__!r} for scene {scene.name!r}"
+            )
+        
+        scene.data_access_info['sensor_calibration'] = sensor_calib
 
         self.dataset_obj.close_db()
 
