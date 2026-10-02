@@ -43,12 +43,27 @@ def find_lane_polylines_parquet(
     df_wait_line: pd.DataFrame,
 ) -> Dict[str, Dict[str, Any]]:
     lanes_dict = {}
+    if df_lane.empty:
+        return lanes_dict
+
+    clip_relations = df_lane_relation[df_lane_relation["key.clip_id"] == clip_id]
+    subjects = clip_relations["Association.subjects"].map(
+        lambda subject: subject.item() if isinstance(subject, np.ndarray) else subject
+    )
+    lane_relations = {
+        lane_id: rows for lane_id, rows in clip_relations.groupby(subjects, sort=False)
+    }
+    wait_lines = {
+        lane_id: rows
+        for lane_id, rows in df_wait_line[
+            df_wait_line["key.clip_id"] == clip_id
+        ].groupby("lane.map_id", sort=False)
+    }
+    empty_relations = df_lane_relation.iloc[:0]
+    empty_wait_lines = df_wait_line.iloc[:0]
     for i in range(df_lane.shape[0]):
         lane_id = df_lane["key.map_id"][i]
-        df_this_lane_relation = df_lane_relation[
-            (df_lane_relation["key.clip_id"] == clip_id)
-            & (df_lane_relation["Association.subjects"] == lane_id)
-        ]
+        df_this_lane_relation = lane_relations.get(lane_id, empty_relations)
         prev_lane_df = df_this_lane_relation[
             (df_this_lane_relation["key.kind"] == "PREVIOUS_LANE")
         ]
@@ -94,10 +109,7 @@ def find_lane_polylines_parquet(
             else {}
         )
 
-        wait_line_df = df_wait_line[
-            (df_wait_line["key.clip_id"] == clip_id)
-            & (df_wait_line["lane.map_id"] == lane_id)
-        ]
+        wait_line_df = wait_lines.get(lane_id, empty_wait_lines)
         wait_line_id = (
             list(wait_line_df["key.map_id"].values) if wait_line_df.shape[0] > 0 else {}
         )
