@@ -6,6 +6,7 @@ import pytest
 
 from trajdata.dataset_specific.mads.mads_utils import (
     _prepare_wait_lines,
+    df_expand_json,
     find_lane_polylines_parquet,
 )
 
@@ -116,6 +117,34 @@ def test_empty_lanes_need_no_relation_columns():
         )
         == {}
     )
+
+
+def test_empty_association_subjects_are_ignored(tmp_path):
+    relations = pd.DataFrame(
+        {
+            "key": [{"clip_id": "clip", "kind": "NEXT_LANE"}] * 2,
+            "association": [
+                {"subjects": [], "objects": ["unrelated"]},
+                {"subjects": ["lane"], "objects": ["next"]},
+            ],
+        }
+    )
+    parquet_path = tmp_path / "association.parquet"
+    relations.to_parquet(parquet_path, index=False)
+    relations = df_expand_json(pd.read_parquet(parquet_path))
+    lanes = pd.DataFrame(
+        {
+            "key.map_id": ["lane"],
+            "Lane.left_rail": [[{"x": 0.0, "y": 1.0, "z": 0.0}]],
+            "Lane.right_rail": [[{"x": 0.0, "y": -1.0, "z": 0.0}]],
+        }
+    )
+    wait_lines = pd.DataFrame(columns=["key.clip_id", "lane.map_id", "key.map_id"])
+
+    result = find_lane_polylines_parquet(lanes, relations, "clip", wait_lines)
+
+    assert list(result) == ["lane"]
+    assert result["lane"]["next_lane"] == ["next"]
 
 
 @pytest.mark.parametrize(

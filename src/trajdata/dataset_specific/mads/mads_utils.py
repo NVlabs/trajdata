@@ -48,7 +48,11 @@ def find_lane_polylines_parquet(
 
     clip_relations = df_lane_relation[df_lane_relation["key.clip_id"] == clip_id]
     subjects = clip_relations["Association.subjects"].map(
-        lambda subject: subject.item() if isinstance(subject, np.ndarray) else subject
+        lambda subject: (
+            (subject.item() if subject.size else None)
+            if isinstance(subject, np.ndarray)
+            else subject
+        )
     )
     first_relations = (
         clip_relations.assign(subject=subjects)
