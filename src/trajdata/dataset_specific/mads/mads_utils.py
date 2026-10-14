@@ -50,69 +50,36 @@ def find_lane_polylines_parquet(
     subjects = clip_relations["Association.subjects"].map(
         lambda subject: subject.item() if isinstance(subject, np.ndarray) else subject
     )
-    lane_relations = {
-        lane_id: rows for lane_id, rows in clip_relations.groupby(subjects, sort=False)
-    }
-    wait_lines = {
-        lane_id: rows
-        for lane_id, rows in df_wait_line[
-            df_wait_line["key.clip_id"] == clip_id
-        ].groupby("lane.map_id", sort=False)
-    }
-    empty_relations = df_lane_relation.iloc[:0]
-    empty_wait_lines = df_wait_line.iloc[:0]
+    first_relations = (
+        clip_relations.assign(subject=subjects)
+        .dropna(subset=["subject"])
+        .drop_duplicates(["subject", "key.kind"])
+    )
+    relation_objects = dict(
+        zip(
+            zip(first_relations["subject"], first_relations["key.kind"]),
+            first_relations["Association.objects"],
+        )
+    )
+    wait_lines = (
+        df_wait_line[df_wait_line["key.clip_id"] == clip_id]
+        .groupby("lane.map_id", sort=False)["key.map_id"]
+        .agg(list)
+        .to_dict()
+    )
+
+    def related(lane_id, kind):
+        key = (lane_id, kind)
+        return list(relation_objects[key]) if key in relation_objects else {}
+
     for i in range(df_lane.shape[0]):
         lane_id = df_lane["key.map_id"][i]
-        df_this_lane_relation = lane_relations.get(lane_id, empty_relations)
-        prev_lane_df = df_this_lane_relation[
-            (df_this_lane_relation["key.kind"] == "PREVIOUS_LANE")
-        ]
-        prev_lane_id = (
-            list(prev_lane_df["Association.objects"].values[0])
-            if prev_lane_df.shape[0] > 0
-            else {}
-        )
-
-        next_lane_df = df_this_lane_relation[
-            (df_this_lane_relation["key.kind"] == "NEXT_LANE")
-        ]
-        next_lane_id = (
-            list(next_lane_df["Association.objects"].values[0])
-            if next_lane_df.shape[0] > 0
-            else {}
-        )
-
-        right_lane_df = df_this_lane_relation[
-            (df_this_lane_relation["key.kind"] == "RIGHT_LANE")
-        ]
-        right_lane_id = (
-            list(right_lane_df["Association.objects"].values[0])
-            if right_lane_df.shape[0] > 0
-            else {}
-        )
-
-        left_lane_df = df_this_lane_relation[
-            (df_this_lane_relation["key.kind"] == "LEFT_LANE")
-        ]
-        left_lane_id = (
-            list(left_lane_df["Association.objects"].values[0])
-            if left_lane_df.shape[0] > 0
-            else {}
-        )
-
-        traffic_sign_df = df_this_lane_relation[
-            (df_this_lane_relation["key.kind"] == "SIGN_TO_LANE")
-        ]
-        traffic_sign_id = (
-            list(traffic_sign_df["Association.objects"].values[0])
-            if traffic_sign_df.shape[0] > 0
-            else {}
-        )
-
-        wait_line_df = wait_lines.get(lane_id, empty_wait_lines)
-        wait_line_id = (
-            list(wait_line_df["key.map_id"].values) if wait_line_df.shape[0] > 0 else {}
-        )
+        prev_lane_id = related(lane_id, "PREVIOUS_LANE")
+        next_lane_id = related(lane_id, "NEXT_LANE")
+        right_lane_id = related(lane_id, "RIGHT_LANE")
+        left_lane_id = related(lane_id, "LEFT_LANE")
+        traffic_sign_id = related(lane_id, "SIGN_TO_LANE")
+        wait_line_id = wait_lines.get(lane_id, {})
 
         if lane_id not in lanes_dict:
             lanes_dict[lane_id] = {}

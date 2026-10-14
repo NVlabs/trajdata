@@ -27,23 +27,25 @@ def test_prepare_wait_lines_drops_rows_without_map_ids():
 
 @pytest.mark.parametrize("nested_rails", [False, True])
 @pytest.mark.parametrize("array_subjects", [False, True])
+@pytest.mark.parametrize("array_objects", [False, True])
 def test_lane_relations_preserve_clip_filter_first_match_and_wait_line_order(
     nested_rails,
     array_subjects,
+    array_objects,
 ):
     clip_id, other_clip = UUID(int=1), UUID(int=2)
     lane_a, lane_b, lane_c = (UUID(int=i) for i in range(3, 6))
     left = np.array([[0.0, 1.0, 0.0], [2.0, 1.0, 0.0]])
     right = left - np.array([0.0, 2.0, 0.0])
-    lanes = {"key.map_id": [lane_a, lane_b, lane_c]}
+    lanes = {"key.map_id": [lane_a, lane_b, lane_c, None]}
     for side, points in (("left", left), ("right", right)):
         if nested_rails:
             lanes[f"Lane.{side}_rail"] = [
                 [dict(zip("xyz", point)) for point in points]
-            ] * 3
+            ] * 4
         else:
             for dimension, coordinates in zip("xyz", points.T):
-                lanes[f"Lane.{side}_rail.{dimension}"] = [coordinates] * 3
+                lanes[f"Lane.{side}_rail.{dimension}"] = [coordinates] * 4
     relations = pd.DataFrame(
         [
             [other_clip, lane_a, "NEXT_LANE", [lane_c]],
@@ -54,6 +56,8 @@ def test_lane_relations_preserve_clip_filter_first_match_and_wait_line_order(
             [clip_id, lane_a, "LEFT_LANE", [lane_c]],
             [clip_id, lane_a, "RIGHT_LANE", [lane_c]],
             [clip_id, lane_a, "SIGN_TO_LANE", ["sign-a"]],
+            [clip_id, None, "NEXT_LANE", [lane_b]],
+            [clip_id, lane_c, None, [lane_b]],
         ],
         columns=[
             "key.clip_id",
@@ -65,6 +69,10 @@ def test_lane_relations_preserve_clip_filter_first_match_and_wait_line_order(
     if array_subjects:
         relations["Association.subjects"] = relations["Association.subjects"].map(
             lambda subject: np.array([subject])
+        )
+    if array_objects:
+        relations["Association.objects"] = relations["Association.objects"].map(
+            lambda objects: np.array(objects, dtype=object)
         )
     wait_lines = pd.DataFrame(
         [
@@ -79,7 +87,7 @@ def test_lane_relations_preserve_clip_filter_first_match_and_wait_line_order(
         pd.DataFrame(lanes), relations, clip_id, wait_lines
     )
 
-    assert list(result) == [lane_a, lane_b, lane_c]
+    assert list(result) == [lane_a, lane_b, lane_c, None]
     assert result[lane_a]["next_lane"] == [lane_b]
     assert result[lane_b]["prev_lane"] == [lane_a]
     assert result[lane_a]["left_lane"] == []
@@ -95,6 +103,7 @@ def test_lane_relations_preserve_clip_filter_first_match_and_wait_line_order(
         "wait_line",
     ):
         assert result[lane_c][kind] == {}
+        assert result[None][kind] == {}
     for lane in result.values():
         np.testing.assert_array_equal(lane["left_rail"], left)
         np.testing.assert_array_equal(lane["right_rail"], right)
@@ -107,3 +116,42 @@ def test_empty_lanes_need_no_relation_columns():
         )
         == {}
     )
+
+
+@pytest.mark.parametrize(
+    "invalid_row", ["matched", "duplicate", "other_lane", "other_clip", "unknown_kind"]
+)
+def test_invalid_relation_objects_raise_only_for_selected_first_match(invalid_row):
+    lanes = pd.DataFrame(
+        {
+            "key.map_id": ["lane"],
+            "Lane.left_rail": [[{"x": 0.0, "y": 1.0, "z": 0.0}]],
+            "Lane.right_rail": [[{"x": 0.0, "y": -1.0, "z": 0.0}]],
+        }
+    )
+    invalid = ["clip", "lane", "NEXT_LANE", None]
+    valid = ["clip", "lane", "NEXT_LANE", ["next"]]
+    if invalid_row == "other_lane":
+        invalid[1] = "unused"
+    elif invalid_row == "other_clip":
+        invalid[0] = "other"
+    elif invalid_row == "unknown_kind":
+        invalid[2] = None
+    rows = [valid, invalid] if invalid_row == "duplicate" else [invalid, valid]
+    relations = pd.DataFrame(
+        rows,
+        columns=[
+            "key.clip_id",
+            "Association.subjects",
+            "key.kind",
+            "Association.objects",
+        ],
+    )
+    wait_lines = pd.DataFrame(columns=["key.clip_id", "lane.map_id", "key.map_id"])
+
+    if invalid_row == "matched":
+        with pytest.raises(TypeError):
+            find_lane_polylines_parquet(lanes, relations, "clip", wait_lines)
+    else:
+        result = find_lane_polylines_parquet(lanes, relations, "clip", wait_lines)
+        assert result["lane"]["next_lane"] == ["next"]
