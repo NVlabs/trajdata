@@ -1,8 +1,9 @@
 import glob
+import logging
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Final, Generator, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Final, Generator, Iterable, List, Optional, Tuple
 
 import numpy as np
 import nuplan.planning.script.config.common as common_cfg
@@ -25,6 +26,8 @@ from trajdata.maps.vec_map_elements import (
 )
 from trajdata.utils import map_utils
 from trajdata.maps.vec_map import split_lane_segments
+
+logger = logging.getLogger(__name__)
 
 NUPLAN_DT: Final[float] = 0.05
 NUPLAN_FULL_MAP_NAME_DICT: Final[Dict[str, str]] = {
@@ -49,16 +52,48 @@ NUPLAN_TRAFFIC_STATUS_DICT: Final[Dict[str, TrafficLightStatus]] = {
     "red": TrafficLightStatus.RED,
     "unknown": TrafficLightStatus.UNKNOWN,
 }
+# Lidar-to-ego extrinsics for the NuPlan real split (trainval/test).
+# Source: NuPlan devkit sensor calibration; verify against your dataset version
+# if using a different split or sensor configuration.
+NUPLAN_REAL_LIDAR2EGO_ROTATION = [-0.0016505558783280307, -0.00023289146777086609, 0.003725490480134295, 0.9999916710390838]
+NUPLAN_REAL_LIDAR2EGO_TRANSLATION = [1.5185133218765259, 0.0, 1.6308990716934204]
 
 
 class NuPlanObject:
-    def __init__(self, dataset_path: Path, subfolder: str) -> None:
+    def __init__(
+        self,
+        dataset_path: Path,
+        subfolder: str,
+        central_tokens_config: Optional[List[Dict[str, Any]]] = None,
+        num_timesteps_before: int = 30,
+        num_timesteps_after: int = 80,
+    ) -> None:
+        """
+        Args:
+            dataset_path: Root path of the NuPlan dataset.
+            subfolder: Subfolder name (e.g. "test", "train").
+            central_tokens_config: Optional list of central tokens configurations.
+            num_timesteps_before: Default number of timesteps before the central token.
+            num_timesteps_after: Default number of timesteps after the central token.
+        """
         self.base_path: Path = dataset_path / subfolder
 
         self.connection: sqlite3.Connection = None
         self.cursor: sqlite3.Cursor = None
 
-        self.scenes: List[Dict[str, str]] = self._load_scenes()
+        self.num_timesteps_before = num_timesteps_before
+        self.num_timesteps_after = num_timesteps_after
+        self.central_tokens_config: List[Dict[str, Any]] = central_tokens_config or []
+
+        # Load scenes based on mode
+        if self.use_central_tokens:
+            self.scenes: List[Dict[str, str]] = self._load_scenes_from_central_tokens()
+        else:
+            self.scenes: List[Dict[str, str]] = self._load_scenes()
+
+    @property
+    def use_central_tokens(self) -> bool:
+        return bool(self.central_tokens_config)
 
     def open_db(self, db_filename: str) -> None:
         self.connection = sqlite3.connect(str(self.base_path / db_filename))
@@ -91,6 +126,107 @@ class NuPlanObject:
         for row in self.cursor:
             yield row
 
+    def _load_scenes_from_central_tokens(self) -> List[Dict[str, str]]:
+        """
+        Create scenes based on a central token and a range of timesteps before and after it.
+        central_tokens_config format: [
+            {
+                "central_token": "hex_string",  # central token as hex string
+                "logfile": "log_filename",      # corresponding log file name (without .db extension)
+            },
+            ...
+        ]
+        """
+        scenes: List[Dict[str, str]] = []
+        
+        for config in self.central_tokens_config:
+            central_token_hex = config["central_token"]
+            logfile = config["logfile"]
+            
+            # Convert hex string to bytearray.
+            central_token = bytearray.fromhex(central_token_hex)
+            
+            # Open the corresponding database.
+            db_path = self.base_path / f"{logfile}.db"
+            if not db_path.exists():
+                print(f"Warning: Database file {db_path} not found, skipping...")
+                continue
+                
+            self.open_db(f"{logfile}.db")
+            
+            # Query the timestamp and location corresponding to the central token.
+            central_token_query = """
+            SELECT  lpc.timestamp,
+                    log.location,
+                    log.logfile
+            FROM lidar_pc AS lpc
+            LEFT JOIN scene AS sc ON lpc.scene_token = sc.token
+            LEFT JOIN log ON sc.log_token = log.token
+            WHERE lpc.token = ?
+            """
+            central_row = self.execute_query_one(central_token_query, (central_token,))
+            
+            if central_row is None:
+                print(f"Warning: Central token {central_token_hex} not found in {logfile}.db, skipping...")
+                self.close_db()
+                continue
+            
+            central_timestamp = central_row["timestamp"]
+            location = central_row["location"]
+            logfile_name = central_row["logfile"]
+            
+            # Query all lidar_pc_tokens in the specified range.
+            # First get all lidar_pc timestamps and then filter those within the range.
+            range_query = """
+            SELECT  lpc.token,
+                    lpc.timestamp
+            FROM lidar_pc AS lpc
+            LEFT JOIN scene AS sc ON lpc.scene_token = sc.token
+            LEFT JOIN log ON sc.log_token = log.token
+            WHERE log.logfile = ?
+            ORDER BY lpc.timestamp ASC
+            """
+            all_frames = self.execute_query_all(range_query, (logfile_name,))
+            
+            # Find the position of the central token in the list.
+            central_idx = None
+            for idx, row in enumerate(all_frames):
+                if row["token"] == central_token:
+                    central_idx = idx
+                    break
+            
+            if central_idx is None:
+                print(f"Warning: Could not find central token in ordered list, skipping...")
+                self.close_db()
+                continue
+            
+            # Compute the range and store it in the config.
+            start_idx = max(0, central_idx - self.num_timesteps_before)
+            end_idx = min(len(all_frames), central_idx + self.num_timesteps_after + 1)
+            
+            # Store start_idx and end_idx in the config.
+            config["start_idx"] = start_idx
+            config["end_idx"] = end_idx
+            
+            num_timesteps = end_idx - start_idx
+            
+            # Create scene name using the central token format.
+            scene_name = f"{logfile_name}-{central_token_hex}"
+            
+            scenes.append(
+                {
+                    "name": scene_name,
+                    "location": _NUPLAN_SQL_MAP_FRIENDLY_NAMES_DICT.get(location, location),
+                    "num_timesteps": num_timesteps,
+                    "start_idx": start_idx, 
+                    "end_idx": end_idx,
+                }
+            )
+            
+            self.close_db()
+        
+        return scenes
+    
     def _load_scenes(self) -> List[Dict[str, str]]:
         scene_info_query = """
         SELECT  sc.token AS scene_token,
@@ -125,6 +261,36 @@ class NuPlanObject:
         return scenes
 
     def get_scene_frames(self, scene: Scene) -> pd.DataFrame:
+        """
+        Get scene frames. Automatically detects scene type and calls the appropriate method.
+
+        Scene naming conventions:
+        - Old format (full scene): "logfile=scene_token"
+        - New format (central token): "logfile-central_token"
+        """
+        # Detect scene type based on naming convention
+        if "=" in scene.name:
+            # Old format: full scene
+            return self._get_scene_frames_full(scene)
+        else:
+            # New format: central token
+            # Check if this is a central token scene by looking for start_idx/end_idx
+            if hasattr(scene, 'data_access_info') and isinstance(scene.data_access_info, dict):
+                if "start_idx" in scene.data_access_info or "end_idx" in scene.data_access_info:
+                    return self._get_scene_frames_with_central_token(scene)
+
+            # Also check central_tokens_config
+            if self.use_central_tokens:
+                return self._get_scene_frames_with_central_token(scene)
+            else:
+                # Fallback to full scene (in case scene uses "-" but is not central token)
+                return self._get_scene_frames_full(scene)
+
+    def _get_scene_frames_full(self, scene: Scene) -> pd.DataFrame:
+        """
+        Get all frames for a complete scene (original/legacy method).
+        Scene name format: "logfile=scene_token"
+        """
         query = """
         SELECT  lpc.token AS lpc_token,
                 ep.x AS ego_x,
@@ -143,11 +309,84 @@ class NuPlanObject:
         WHERE scene_token = ?
         ORDER BY lpc.timestamp ASC;
         """
+        # Parse scene name: "logfile=scene_token"
         log_filename, scene_token_str = scene.name.split("=")
         scene_token = bytearray.fromhex(scene_token_str)
 
         return pd.read_sql_query(
             query, self.connection, index_col="lpc_token", params=(scene_token,)
+        )
+
+    def _get_scene_frames_with_central_token(self, scene: Scene) -> pd.DataFrame:
+        """
+        Get frames for a central token scene (new method).
+        Scene name format: "logfile-central_token"
+        """
+        log_filename, scene_token_str = scene.name.rsplit("-", 1)
+        scene_token = bytearray.fromhex(scene_token_str)
+        
+        # Look up the corresponding start_idx and end_idx from the config.
+        start_idx = None
+        end_idx = None
+        
+        # Find the matching config.
+        for config in self.central_tokens_config:
+            if config.get("central_token") == scene_token_str and config.get("logfile") == log_filename:
+                start_idx = config.get("start_idx")
+                end_idx = config.get("end_idx")
+                break
+        
+        # If not found, try to get them from scene.data_access_info (if stored previously).
+        if start_idx is None or end_idx is None:
+            if hasattr(scene, 'data_access_info') and isinstance(scene.data_access_info, dict):
+                start_idx = scene.data_access_info.get("start_idx")
+                end_idx = scene.data_access_info.get("end_idx")
+        
+        # If still not found, raise an error.
+        if start_idx is None or end_idx is None:
+            raise ValueError(
+                f"Could not find start_idx and end_idx for scene {scene.name}. "
+                f"Please ensure the scene was created with central token configuration."
+            )
+        
+        range_query = """
+            SELECT  lpc.token,
+                    lpc.timestamp
+            FROM lidar_pc AS lpc
+            LEFT JOIN scene AS sc ON lpc.scene_token = sc.token
+            LEFT JOIN log ON sc.log_token = log.token
+            WHERE log.logfile = ?
+            ORDER BY lpc.timestamp ASC
+            """
+            
+        all_frames = self.execute_query_all(range_query, (log_filename,))
+        target_tokens = [row["token"] for row in all_frames[start_idx:end_idx]]
+        
+        if not target_tokens:
+            raise ValueError(f"No tokens found in range [{start_idx}, {end_idx})")
+        
+        # Query frame data corresponding to these tokens.
+        query = f"""
+        SELECT  lpc.token AS lpc_token,
+                ep.x AS ego_x,
+                ep.y AS ego_y,
+                ep.z AS ego_z,
+                ep.qw AS ego_qw,
+                ep.qx AS ego_qx,
+                ep.qy AS ego_qy,
+                ep.qz AS ego_qz,
+                ep.vx AS ego_vx,
+                ep.vy AS ego_vy,
+                ep.acceleration_x AS ego_ax,
+                ep.acceleration_y AS ego_ay
+        FROM lidar_pc AS lpc
+        LEFT JOIN ego_pose AS ep ON lpc.ego_pose_token = ep.token
+        WHERE lpc.token IN ({('?,'*len(target_tokens))[:-1]})
+        ORDER BY lpc.timestamp ASC;
+        """
+        
+        return pd.read_sql_query(
+            query, self.connection, index_col="lpc_token", params=target_tokens
         )
 
     def get_detected_agents(self, binary_lpc_tokens: List[bytearray]) -> pd.DataFrame:
@@ -185,6 +424,140 @@ class NuPlanObject:
         df["status"] = df["raw_status"].map(NUPLAN_TRAFFIC_STATUS_DICT)
         df["lane_id"] = df["lane_id"].astype(str)
         return df.drop(columns=["raw_status"])
+
+    def get_sensor_calibration(self, log_filename: str) -> Dict[str, Any]:
+        """
+        Extract camera and lidar calibration information from the NuPlan database.
+        
+        Args:
+            log_filename: Log file name (without .db extension).
+            
+        Returns:
+            Dict containing 'cameras' and 'lidar' calibration info.
+        """
+        sensor_calib: Dict[str, Any] = {
+            'cameras': {},
+            'lidar': {
+            'channel': 'LIDAR_TOP',
+            'sensor2ego_rotation': np.array(NUPLAN_REAL_LIDAR2EGO_ROTATION),
+            'sensor2ego_translation': np.array(NUPLAN_REAL_LIDAR2EGO_TRANSLATION),
+            }
+        }
+        try:
+            import pickle
+            # NuPlan stores these camera calibration fields as pickle-backed SQL
+            # columns in the official ORM. See nuplan.database.common.sql_types
+            # SimplePickleType and nuplan.database.nuplan_db_orm.camera.Camera.
+            # This mirrors the official deserialization path, so the NuPlan SQLite
+            # DB is treated as trusted input and must not be an arbitrary DB file.
+
+            # Check whether the database connection is already open.
+            if not self.connection.in_transaction:
+                db_path = self.base_path / f"{log_filename}.db"
+                if not db_path.exists():
+                    return sensor_calib
+                self.open_db(f"{log_filename}.db")
+                should_close = True
+            else:
+                should_close = False
+
+            # Query log token.
+            log_query = "SELECT token FROM log WHERE logfile = ?"
+            log_row = self.execute_query_one(log_query, (log_filename,))
+            if log_row is None:
+                if should_close:
+                    self.close_db()
+                return sensor_calib
+
+            log_token = log_row['token']
+
+            # Query the camera table (if it exists).
+            try:
+                camera_query = """
+                SELECT channel, translation, rotation, intrinsic, distortion, height, width
+                FROM camera
+                WHERE log_token = ?
+                """
+                camera_rows = self.execute_query_all(camera_query, (log_token,))
+
+                for row in camera_rows:
+                    cam_name = row['channel']
+
+                    # Parse pickle serialized data.
+                    try:
+                        # translation is nuplan.database.common.data_types.Translation.
+                        trans_obj = pickle.loads(row['translation'])
+                        if hasattr(trans_obj, '__iter__') and not isinstance(trans_obj, str):
+                            translation = np.array(list(trans_obj))
+                        else:
+                            translation = np.array([trans_obj.x, trans_obj.y, trans_obj.z]) if hasattr(trans_obj, 'x') else None
+                    except Exception:
+                        logger.warning("Failed to parse translation for camera %s in %s", cam_name, log_filename)
+                        translation = None
+
+                    try:
+                        # rotation is nuplan.database.common.data_types.Rotation (quaternion).
+                        rot_obj = pickle.loads(row['rotation'])
+                        if hasattr(rot_obj, '__iter__') and not isinstance(rot_obj, str):
+                            rotation = np.array(list(rot_obj))
+                        elif hasattr(rot_obj, 'w'):
+                            rotation = np.array([rot_obj.w, rot_obj.x, rot_obj.y, rot_obj.z])
+                        elif hasattr(rot_obj, 'quaternion'):
+                            q = rot_obj.quaternion
+                            rotation = np.array([q.w, q.x, q.y, q.z]) if hasattr(q, 'w') else None
+                        else:
+                            rotation = None
+                    except Exception:
+                        logger.warning("Failed to parse rotation for camera %s in %s", cam_name, log_filename)
+                        rotation = None
+
+                    try:
+                        # intrinsic is nuplan.database.common.data_types.CameraIntrinsic.
+                        intrinsic_obj = pickle.loads(row['intrinsic'])
+                        if isinstance(intrinsic_obj, np.ndarray):
+                            intrinsic = intrinsic_obj
+                        elif hasattr(intrinsic_obj, '__iter__') and not isinstance(intrinsic_obj, str):
+                            intrinsic = np.array(intrinsic_obj)
+                        else:
+                            intrinsic = None
+                        # Ensure it is a 3x3 matrix.
+                        if intrinsic is not None and intrinsic.shape != (3, 3):
+                            intrinsic = intrinsic.reshape(3, 3) if intrinsic.size == 9 else None
+                    except Exception:
+                        logger.warning("Failed to parse intrinsic for camera %s in %s", cam_name, log_filename)
+                        intrinsic = None
+
+                    try:
+                        # distortion is a list.
+                        distortion_obj = pickle.loads(row['distortion'])
+                        if isinstance(distortion_obj, np.ndarray):
+                            distortion = distortion_obj
+                        elif isinstance(distortion_obj, (list, tuple)):
+                            distortion = np.array(distortion_obj)
+                        else:
+                            distortion = None
+                    except Exception:
+                        logger.warning("Failed to parse distortion for camera %s in %s", cam_name, log_filename)
+                        distortion = None
+
+                    sensor_calib['cameras'][cam_name] = {
+                        'channel': cam_name,
+                        'sensor2ego_rotation': rotation,
+                        'sensor2ego_translation': translation,
+                        'intrinsic': intrinsic,
+                        'distortion': distortion,
+                        'height': 1080,
+                        'width': 1920,
+                    }
+            except sqlite3.OperationalError:
+                logger.debug("Camera table not found in %s.db, skipping camera calibration", log_filename)
+            except Exception:
+                logger.warning("Unexpected error reading camera calibration from %s.db", log_filename, exc_info=True)
+
+        except Exception:
+            logger.warning("Failed to load sensor calibration for %s", log_filename, exc_info=True)
+
+        return sensor_calib
 
     def close_db(self) -> None:
         self.cursor.close()

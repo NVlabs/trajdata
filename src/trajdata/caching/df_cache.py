@@ -719,14 +719,14 @@ class DataFrameCache(SceneCache):
 
     @staticmethod
     def is_map_cached(
-        cache_path: Path, env_name: str, map_name: str, resolution: float
+        cache_path: Path, env_name: str, map_name: str
     ) -> bool:
         (
             maps_path,
             vector_map_path,
             kdtrees_path,
             rtrees_path,
-        ) = DataFrameCache.get_map_paths(cache_path, env_name, map_name, resolution)
+        ) = DataFrameCache.get_map_paths(cache_path, env_name, map_name)
 
         # TODO(bivanovic): For now, rtrees are optional to have in the cache.
         # In the future, they may be required (likely after we develop an
