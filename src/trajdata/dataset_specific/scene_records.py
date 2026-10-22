@@ -26,6 +26,14 @@ class InteractionRecord(NamedTuple):
     data_idx: int
 
 
+class SongdoSceneRecord(NamedTuple):
+    name: str
+    location: str
+    length: str
+    desc: str
+    data_idx: int
+
+
 class NuscSceneRecord(NamedTuple):
     name: str
     location: str

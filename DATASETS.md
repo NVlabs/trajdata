@@ -201,6 +201,33 @@ It should look like this after downloading:
 **Note**: Only the annotations need to be downloaded (not the videos).
 
 
+## Songdo Traffic
+[~700,000 georeferenced vehicle trajectories](https://doi.org/10.5281/zenodo.13828383) over 20 intersections in Songdo, South Korea, extracted from bird's-eye-view drone footage recorded at 29.97 fps from 140-150 m over four days in October 2022, and described in [Fonod et al. (2025)](https://doi.org/10.1016/j.trc.2025.105205).
+
+Only the 80 per-day, per-intersection trajectory archives are needed. They can be passed as downloaded:
+```
+/path/to/songdo/
+            ├── 2022-10-04_A.zip
+            ├── 2022-10-04_B.zip
+            ├── ...
+            └── 2022-10-07_U.zip
+```
+or extracted, in which case the CSVs may sit anywhere below the data directory:
+```
+/path/to/songdo/
+            ├── 2022-10-04_A/
+            |   ├── 2022-10-04_A_AM1.csv
+            |   ├── 2022-10-04_A_AM2.csv
+            |   └── ...
+            └── ...
+```
+
+**Note**: reading from the archives is usually preferable, since extracting all 80 turns 41 GB into roughly 165 GB. An extracted CSV takes precedence over the same session inside an archive, so a partially extracted copy is indexed once, not twice.
+
+Each archive holds the ten ~30-minute flight sessions recorded at one intersection on one day, and a drone lands to swap batteries every few minutes, so a session is not one continuous observation. The loader splits it into one scene per contiguous single-drone clip: 3,052 scenes over 138 hours, divided by day into 1,519 `train`, 764 `val` and 769 `test`. Indexing reads every session's timestamps once, about ten minutes for the full release, and only when the cache is built.
+
+Positions, speed, acceleration and extents are the dataset's published values rather than quantities recomputed here; heading is the one kinematic quantity it does not publish, and is derived as geo-trax itself derives it. Partially visible observations keep their positions but carry no velocity or acceleration, as published, so roughly 5% of states have none. `dt` is declared as a nominal 1/30 s rather than the true 1001/30000 s, as it is for the Stanford Drone Dataset, so that trajdata's timestep interpolation can reach 0.1 s. The constants in `dataset_specific/songdo/` document each of these choices.
+
 ## Argoverse 2 Motion Forecasting
 The dataset can be downloaded from [here](https://www.argoverse.org/av2.html#download-link).
 

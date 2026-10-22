@@ -50,6 +50,13 @@ def get_raw_dataset(dataset_name: str, data_dir: str) -> RawDataset:
             dataset_name, data_dir, parallelizable=True, has_maps=True
         )
 
+    if "songdo" in dataset_name:
+        from trajdata.dataset_specific.songdo import SongdoDataset
+
+        return SongdoDataset(
+            dataset_name, data_dir, parallelizable=True, has_maps=False
+        )
+
     if "av2" in dataset_name:
         from trajdata.dataset_specific.argoverse2 import Av2Dataset
 
