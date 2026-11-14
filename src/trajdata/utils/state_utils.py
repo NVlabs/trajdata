@@ -87,17 +87,17 @@ def transform_to_frame(
     if "x" in attributes and "y" in attributes:
         # transform xy position with translation and rotation
         new_state.position = transform_coords_2d_np(
-            state.position, offset=-frame_state.position, rot_mat=rot_mat
+            state.position - frame_state.position, rot_mat=rot_mat
         )
     if "xd" in attributes and "yd" in attributes:
         # transform velocities
         new_state.velocity = transform_coords_2d_np(
-            state.velocity, offset=-frame_state.velocity, rot_mat=rot_mat
+            state.velocity - frame_state.velocity, rot_mat=rot_mat
         )
     if "xdd" in attributes and "ydd" in attributes:
         # transform acceleration
         new_state.acceleration = transform_coords_2d_np(
-            state.acceleration, offset=-frame_state.acceleration, rot_mat=rot_mat
+            state.acceleration - frame_state.acceleration, rot_mat=rot_mat
         )
     if "c" in attributes and "s" in attributes:
         new_state.heading_vector = transform_coords_2d_np(
