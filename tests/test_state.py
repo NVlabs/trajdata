@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from trajdata.data_structures.state import NP_STATE_TYPES, TORCH_STATE_TYPES
+from trajdata.utils.state_utils import transform_from_frame, transform_to_frame
 
 AgentStateArray = NP_STATE_TYPES["x,y,z,xd,yd,xdd,ydd,h"]
 AgentObsArray = NP_STATE_TYPES["x,y,z,xd,yd,xdd,ydd,s,c"]
@@ -175,6 +176,43 @@ class TestStateArray(unittest.TestCase):
         c = np.mean(b)
         self.assertFalse(isinstance(c, AgentStateArray))
         self.assertTrue(isinstance(c, float))
+
+
+class TestStateUtils(unittest.TestCase):
+    def test_transform_to_from_frame(self):
+        frame = np.array([10.0, 5.0, 0.0, 2.0, 1.0, 0.5, -0.5, np.pi / 2]).view(
+            AgentStateArray
+        )
+        state = np.array(
+            [
+                [10.0, 7.0, 0.0, 2.0, 4.0, 0.5, 1.5, np.pi / 2],
+                [8.0, 5.0, 0.0, 0.0, 1.0, -0.5, -0.5, -np.pi / 2],
+            ]
+        ).view(AgentStateArray)
+
+        h = np.pi / 2
+        rot_mat = np.array([[np.cos(h), np.sin(h)], [-np.sin(h), np.cos(h)]])
+
+        local = transform_to_frame(state, frame)
+        self.assertTrue(
+            np.allclose(local.position, (state.position - frame.position) @ rot_mat.T)
+        )
+        self.assertTrue(
+            np.allclose(local.velocity, (state.velocity - frame.velocity) @ rot_mat.T)
+        )
+        self.assertTrue(
+            np.allclose(
+                local.acceleration,
+                (state.acceleration - frame.acceleration) @ rot_mat.T,
+            )
+        )
+        self.assertTrue(np.allclose(local.position[0], [2.0, 0.0]))
+        self.assertTrue(np.allclose(local.heading[:, 0], [0.0, -np.pi]))
+
+        world = transform_from_frame(local, frame)
+        self.assertTrue(np.allclose(world.position, state.position))
+        self.assertTrue(np.allclose(world.velocity, state.velocity))
+        self.assertTrue(np.allclose(world.acceleration, state.acceleration))
 
 
 if __name__ == "__main__":
